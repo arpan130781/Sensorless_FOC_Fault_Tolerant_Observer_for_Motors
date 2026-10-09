@@ -1,0 +1,50 @@
+{
+  "motor": {
+    "Rs": 0.5,
+    "Ls": 0.001,
+    "psi_f": 0.015,
+    "P": 4,
+    "J": 0.0001,
+    "B": 0.001,
+    "Vbus": 24.0,
+    "In": 5.0
+  },
+  "controller": {
+    "id_kp": 6.28,
+    "id_ki": 3142.0,
+    "iq_kp": 6.28,
+    "iq_ki": 3142.0,
+    "spd_kp": 0.194,
+    "spd_ki": 17.4,
+    "smo_k": 37.7,
+    "smo_h": 0.5,
+    "smo_lpf": 50.0,
+    "flux_wc": 125.6,
+    "observer_select": 0,
+    "pwm_freq": 20000.0,
+    "ctrl_rate_curr": 20000.0,
+    "ctrl_rate_spd": 1000.0
+  },
+  "sim": {
+    "dt_control": 5e-05,
+    "dt_plant": 1e-05,
+    "total_time": 3.0,
+    "speed_ref_rpm": 2000.0
+  },
+  "scenario": {
+    "type": "parameter_drift",
+    "param": "Rs",
+    "scale": 1.5,
+    "onset_time": 1.5,
+    "expected_outcome": {
+      "fault_onset_time": 1.5,
+      "expected_mode_after_fault": 2,
+      "criteria": {
+        "angle_error_rms": 8.0,
+        "max_angle_error": 25.0,
+        "mean_speed": 20.0,
+        "speed_ripple_ptp": 450.0
+      }
+    }
+  }
+}

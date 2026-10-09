@@ -1,0 +1,188 @@
+no_fault_baseline:
+  description: Baseline
+  type: none
+  expected_outcome:
+    criteria:
+      angle_error_rms: 5.0
+      max_angle_error: 15.0
+      mean_speed: 10.0
+      settling_time: 1.0
+      speed_ripple_ptp: 450.0
+scenario_1_rs_drift:
+  type: parameter_drift
+  param: Rs
+  scale: 1.5
+  onset_time: 1.5
+  expected_outcome:
+    fault_onset_time: 1.5
+    expected_mode_after_fault: 2
+    criteria:
+      angle_error_rms: 8.0
+      max_angle_error: 25.0
+      mean_speed: 20.0
+      speed_ripple_ptp: 450.0
+scenario_2_offset_a_2_0:
+  type: sensor_offset
+  channel: a
+  offset: 2.0
+  onset_time: 2.0
+  expected_outcome:
+    fault_onset_time: 2.0
+    expected_fault_channel: 1
+    expected_mode_after_fault: 3
+    criteria:
+      detection_latency: 20.0
+      fault_isolation: 1.0
+      mean_speed: 50.0
+      angle_error_rms: 10.0
+      max_angle_error: 35.0
+      speed_ripple_ptp: 450.0
+      reconstruction_error_rms: 0.5
+scenario_3_stuck_b_2_0:
+  type: sensor_stuck
+  channel: b
+  onset_time: 2.0
+  expected_outcome:
+    fault_onset_time: 2.0
+    expected_fault_channel: 2
+    expected_mode_after_fault: 3
+    criteria:
+      detection_latency: 20.0
+      fault_isolation: 2.0
+      mean_speed: 50.0
+      angle_error_rms: 10.0
+      max_angle_error: 35.0
+      speed_ripple_ptp: 450.0
+      reconstruction_error_rms: 0.5
+scenario_4_stuck_a_limit:
+  type: sensor_stuck_limit
+  channel: a
+  limit: 10.0
+  onset_time: 2.0
+  expected_outcome:
+    fault_onset_time: 2.0
+    expected_fault_channel: 1
+    expected_mode_after_fault: 3
+    criteria:
+      detection_latency: 12.0
+      fault_isolation: 1.0
+      mean_speed: 50.0
+      angle_error_rms: 10.0
+      max_angle_error: 60.0
+      speed_ripple_ptp: 450.0
+      reconstruction_error_rms: 1.5
+scenario_5_simultaneous:
+  type: sensor_offset
+  channel: c
+  offset: 2.0
+  onset_time: 1.5
+  load_step:
+    onset_time: 1.5
+    torque_Nm: 0.1
+  expected_outcome:
+    fault_onset_time: 1.5
+    expected_mode_after_fault: 3
+    criteria:
+      mean_speed: 300.0
+      angle_error_rms: 15.0
+      max_angle_error: 45.0
+      speed_ripple_ptp: 450.0
+      reconstruction_error_rms: 0.5
+scenario_6_noise_burst:
+  type: noise_burst
+  channel: a
+  magnitude: 2.0
+  onset_time: 1.5
+  duration: 0.1
+  expected_outcome:
+    fault_onset_time: 1.5
+    expected_mode_after_fault: 2
+    criteria:
+      mean_speed: 300.0
+      angle_error_rms: 15.0
+      max_angle_error: 45.0
+      speed_ripple_ptp: 450.0
+      recovery_time: 0.55
+scenario_7_inductance_mismatch:
+  type: parameter_drift
+  param: Ls
+  scale: 0.8
+  onset_time: 1.5
+  expected_outcome:
+    fault_onset_time: 1.5
+    expected_mode_after_fault: 2
+    criteria:
+      mean_speed: 20.0
+      angle_error_rms: 8.0
+      max_angle_error: 25.0
+      speed_ripple_ptp: 400.0
+scenario_8_speed_reversal:
+  type: none
+  speed_reversal:
+    onset_time: 2.0
+    new_speed_rpm: -2000.0
+  expected_outcome:
+    expected_mode_after_fault: 2
+    criteria:
+      mean_speed: 300.0
+      angle_error_rms: 20.0
+      max_angle_error: 150.0
+      speed_ripple_ptp: 4500.0
+scenario_9_load_step:
+  type: none
+  load_step:
+    onset_time: 1.5
+    torque_Nm: 0.1
+  expected_outcome:
+    expected_mode_after_fault: 2
+    criteria:
+      mean_speed: 20.0
+      angle_error_rms: 10.0
+      max_angle_error: 30.0
+      speed_ripple_ptp: 450.0
+scenario_10_low_speed:
+  type: none
+  speed_ref_rpm: 500.0
+  expected_outcome:
+    expected_mode_after_fault: 2
+    criteria:
+      mean_speed: 50.0
+      angle_error_rms: 20.0
+      max_angle_error: 80.0
+      speed_ripple_ptp: 1000.0
+scenario_11_slow_ramp:
+  type: none
+  speed_ref_rpm: 500.0
+  slow_ramp:
+    onset_time: 1.5
+    rate_rpm_per_s: 500.0
+  expected_outcome:
+    expected_mode_after_fault: 2
+    criteria:
+      mean_speed: 300.0
+      angle_error_rms: 10.0
+      max_angle_error: 25.0
+      speed_ripple_ptp: 1000.0
+scenario_12_ambiguous_fault:
+  type: simultaneous
+  faults:
+  - type: sensor_offset
+    channel: a
+    offset: 2.0
+    onset_time: 2.0
+  - type: sensor_offset
+    channel: b
+    offset: 2.0
+    onset_time: 2.0
+  - type: sensor_offset
+    channel: c
+    offset: 2.0
+    onset_time: 2.0
+  expected_outcome:
+    fault_onset_time: 2.0
+    expected_mode_after_fault: 4
+    criteria:
+      mean_speed: 300.0
+      angle_error_rms: 20.0
+      max_angle_error: 80.0
+      speed_ripple_ptp: 1000.0
