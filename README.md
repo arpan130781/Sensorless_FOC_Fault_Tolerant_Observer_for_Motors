@@ -103,67 +103,22 @@ The project separates the embedded-oriented control implementation from the simu
 
 ## 3.1 High-Level Architecture
 
-```text
-                 Speed / Torque Reference
-                           |
-                           v
-                +---------------------+
-                | Startup and Handoff |
-                | State Machine       |
-                +---------------------+
-                           |
-                           v
-Measured Phase Currents --> Fault Monitor
-                           |
-                           | Healthy measurements
-                           | or reconstructed current
-                           v
-                +---------------------+
-                | Clarke Transform    |
-                | abc -> alpha-beta   |
-                +---------------------+
-                           |
-                           v
-                +---------------------+
-                | Sensorless Observer |
-                |                     |
-                | Sliding Mode        |
-                | Observer            |
-                |                     |
-                | Flux Observer       |
-                +---------------------+
-                           |
-                           v
-                +---------------------+
-                | Observer Manager    |
-                | Confidence and      |
-                | Disagreement        |
-                +---------------------+
-                           |
-                           v
-                +---------------------+
-                | Park Transform      |
-                | alpha-beta -> d-q   |
-                +---------------------+
-                           |
-                           v
-                +---------------------+
-                | PI Controllers      |
-                | d-axis / q-axis     |
-                | Speed Regulation    |
-                +---------------------+
-                           |
-                           v
-                +---------------------+
-                | Inverse Park        |
-                | and SVM             |
-                +---------------------+
-                           |
-                           v
-                   PWM Duty Outputs
-                           |
-                           v
-                    Motor / Inverter
+```mermaid
+flowchart TD
+    A["Speed / Torque Reference"] --> B["Startup and Handoff State Machine"]
+    B --> C["Measured Phase Currents"]
+    C --> D["Fault Monitor"]
+    D --> E["Healthy Measurements or Reconstructed Current"]
+    E --> F["Clarke Transform<br/>abc → alpha-beta"]
+    F --> G["Sensorless Observer"]
+    G --> H["Sliding Mode Observer (SMO)"]
+    G --> I["Flux Observer"]
+    H --> J["Observer Manager"]
+    I --> J
+    J --> K["Confidence Evaluation and Observer Selection"]
+    K --> L["Electrical Angle and Speed Estimate"]
+    L --> M["Park Transform and FOC Control"]
+    M --> N["PWM Generation"]
 ```
 
 The Python simulation supplies the motor and inverter model, while the compiled C library executes the controller logic.
