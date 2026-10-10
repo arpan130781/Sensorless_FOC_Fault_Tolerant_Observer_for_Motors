@@ -1,0 +1,8 @@
+
+Evaluation for no_fault_baseline:
+  max_angle_error      : PASS (value=5.84)
+  angle_error_rms      : PASS (value=2.16)
+  speed_ripple_ptp     : PASS (value=38.79)
+  mean_speed           : PASS (value=14.46)
+  expected_mode        : PASS (value=2.00)
+PASS (no_fault_baseline): Maintained stable control.

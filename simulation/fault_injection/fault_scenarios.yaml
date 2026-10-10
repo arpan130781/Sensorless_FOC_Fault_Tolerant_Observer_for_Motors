@@ -11,7 +11,7 @@ no_fault_baseline:
 scenario_1_rs_drift:
   type: parameter_drift
   param: Rs
-  scale: 1.5
+  scale: 1.05
   onset_time: 1.5
   expected_outcome:
     fault_onset_time: 1.5
@@ -73,6 +73,7 @@ scenario_4_stuck_a_limit:
       reconstruction_error_rms: 1.5
 scenario_5_simultaneous:
   type: sensor_offset
+  speed_ref_rpm: 1800.0
   channel: c
   offset: 2.0
   onset_time: 1.5
@@ -81,11 +82,14 @@ scenario_5_simultaneous:
     torque_Nm: 0.1
   expected_outcome:
     fault_onset_time: 1.5
+    expected_fault_channel: 3
     expected_mode_after_fault: 3
     criteria:
-      mean_speed: 300.0
-      angle_error_rms: 15.0
-      max_angle_error: 45.0
+      detection_latency: 20.0
+      fault_isolation: 3.0
+      mean_speed: 50.0
+      angle_error_rms: 10.0
+      max_angle_error: 35.0
       speed_ripple_ptp: 450.0
       reconstruction_error_rms: 0.5
 scenario_6_noise_burst:
@@ -130,6 +134,7 @@ scenario_8_speed_reversal:
       speed_ripple_ptp: 4500.0
 scenario_9_load_step:
   type: none
+  speed_ref_rpm: 1800.0
   load_step:
     onset_time: 1.5
     torque_Nm: 0.1

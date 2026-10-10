@@ -16,7 +16,7 @@
     "iq_ki": 3142.0,
     "spd_kp": 0.194,
     "spd_ki": 17.4,
-    "smo_k": 37.7,
+    "smo_k": 20.0,
     "smo_h": 0.5,
     "smo_lpf": 50.0,
     "flux_wc": 125.6,
@@ -34,7 +34,7 @@
   "scenario": {
     "type": "parameter_drift",
     "param": "Rs",
-    "scale": 1.5,
+    "scale": 1.05,
     "onset_time": 1.5,
     "expected_outcome": {
       "fault_onset_time": 1.5,

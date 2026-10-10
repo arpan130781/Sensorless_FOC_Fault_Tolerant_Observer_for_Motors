@@ -35,7 +35,7 @@ def compute_speed_tracking_error(result, ref_speed=2000.0, start_time=None, end_
         'steady_state': float(np.mean(np.abs(err[-1000:])))
     }
 
-def compute_settling_time(result, ref_speed=2000.0, threshold_pct=5.0) -> float:
+def compute_settling_time(result, ref_speed=2000.0, threshold_pct=5.0, transition_time=0.0) -> float:
     threshold = abs(ref_speed) * (threshold_pct / 100.0)
     err = np.abs(result.speed_rpm - ref_speed)
     # Find the first point after which the speed remains within the specified tolerance
@@ -50,7 +50,7 @@ def compute_settling_time(result, ref_speed=2000.0, threshold_pct=5.0) -> float:
         # Never settled
         return float('inf')
         
-    return float(result.time[last_unsettled_idx + 1])
+    return float(result.time[last_unsettled_idx + 1] - transition_time)
 
 def compute_current_reconstruction_error(result, fault_onset_time) -> dict:
     post_fault = result.time >= fault_onset_time
@@ -74,7 +74,7 @@ def compute_current_reconstruction_error(result, fault_onset_time) -> dict:
         'max': max(max_a, max_b, max_c)
     }
     
-def evaluate_scenario(result, criteria_dict, fault_onset_time=float('inf'), ref_speed=2000.0, start_time=None, expected_fault_channel=0, expected_mode_after_fault=3):
+def evaluate_scenario(result, criteria_dict, fault_onset_time=float('inf'), ref_speed=2000.0, start_time=None, expected_fault_channel=0, expected_mode_after_fault=3, disturbance_duration=0.0, transition_time=0.0):
     out = {}
     mask = _get_mask(result, start_time, None)
     
@@ -89,7 +89,7 @@ def evaluate_scenario(result, criteria_dict, fault_onset_time=float('inf'), ref_
             ptp = np.ptp(result.speed_rpm[mask])
             out[crit] = {'pass': ptp <= limit, 'value': ptp}
         elif crit == 'settling_time':
-            val = compute_settling_time(result, ref_speed=ref_speed)
+            val = compute_settling_time(result, ref_speed=ref_speed, transition_time=transition_time)
             out[crit] = {'pass': val <= limit, 'value': val}
         elif crit == 'mean_speed':
             end_mask = _get_mask(result, start_time, None)
@@ -111,9 +111,11 @@ def evaluate_scenario(result, criteria_dict, fault_onset_time=float('inf'), ref_
                 modes = result.fault_channel[post_fault]
                 if len(modes) > 0:
                     isolated = modes[-1]
+                    # Check if it was consistently isolated
+                    passed = np.all(modes == expected_fault_channel)
                 else:
                     isolated = 0
-                passed = (isolated == expected_fault_channel)
+                    passed = False
                 out[crit] = {'pass': passed, 'value': isolated}
         
         elif crit == 'reconstruction_error_rms':
@@ -137,10 +139,9 @@ def evaluate_scenario(result, criteria_dict, fault_onset_time=float('inf'), ref_
                     recovered_idx = np.where((time_post > t_degraded) & (mode_post == 2))[0]
                     if len(recovered_idx) > 0:
                         t_recovered = time_post[recovered_idx[0]]
-                        # the noise burst duration is 0.1s
-                        # So fault ends at fault_onset_time + 0.1
-                        # Recovery should happen within `limit` after the fault ends
-                        val = t_recovered - (fault_onset_time + 0.1)
+                        # The disturbance duration comes from config
+                        duration = disturbance_duration
+                        val = t_recovered - (fault_onset_time + duration)
                         passed = 0 <= val <= limit
                     else:
                         val = -1.0

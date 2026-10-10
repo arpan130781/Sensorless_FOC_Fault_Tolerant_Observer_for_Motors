@@ -222,8 +222,13 @@ if __name__ == '__main__':
             duration = SIM_PARAMS['total_time'] - sc_conf['slow_ramp']['onset_time']
             ref_speed = ref_speed + rate * duration
         
+        trans_time = 0.0
+        if 'speed_reversal' in sc_conf: trans_time = sc_conf['speed_reversal'].get('onset_time', 0.0)
+        elif 'load_step' in sc_conf: trans_time = sc_conf['load_step'].get('onset_time', 0.0)
+        elif 'slow_ramp' in sc_conf: trans_time = sc_conf['slow_ramp'].get('onset_time', 0.0)
+        
         evaluation = evaluate_scenario(res, criteria, onset, ref_speed, start_time=2.0, 
-                                       expected_fault_channel=expected_ch, expected_mode_after_fault=expected_mode)
+                                       expected_fault_channel=expected_ch, expected_mode_after_fault=expected_mode, disturbance_duration=sc_conf.get('duration', 0.0), transition_time=trans_time)
         
         all_passed = True
         print(f"\nEvaluation for {args.scenario}:")

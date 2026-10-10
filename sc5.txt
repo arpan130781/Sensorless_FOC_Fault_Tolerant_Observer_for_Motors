@@ -1,0 +1,11 @@
+
+Evaluation for scenario_5_simultaneous:
+  detection_latency    : PASS (value=1.95)
+  fault_isolation      : FAIL (value=0.00)
+  mean_speed           : FAIL (value=2321.72)
+  angle_error_rms      : FAIL (value=85.18)
+  max_angle_error      : FAIL (value=179.96)
+  speed_ripple_ptp     : PASS (value=267.11)
+  reconstruction_error_rms : FAIL (value=2.00)
+  expected_mode        : FAIL (value=4.00)
+FAIL (scenario_5_simultaneous): Did not meet all criteria.

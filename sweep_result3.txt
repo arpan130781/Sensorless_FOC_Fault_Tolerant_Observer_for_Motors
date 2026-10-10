@@ -1,0 +1,23 @@
+144 runs
+
+fault                    ref    isolated   acceptable  worst case (ride-through)
+sensor_offset 0.5 A     1500    5/24 ( 21%)   15/24 ( 62%)  mean 1200 rpm, angle 19 deg   <-- BELOW TARGET
+sensor_offset 0.5 A     2000    3/24 ( 12%)    7/24 ( 29%)  mean 1114 rpm, angle 21 deg   <-- BELOW TARGET
+sensor_offset 2 A       1500   22/24 ( 92%)   22/24 ( 92%)  mean 906 rpm, angle 180 deg
+sensor_offset 2 A       2000   14/24 ( 58%)   14/24 ( 58%)  mean 873 rpm, angle 180 deg   <-- BELOW TARGET
+sensor_stuck            1500   24/24 (100%)   24/24 (100%)  mean 1494 rpm, angle 14 deg
+sensor_stuck            2000   24/24 (100%)   24/24 (100%)  mean 1992 rpm, angle 13 deg
+  UNACCEPTABLE sensor_offset off=0.5 ref=2000 ch=a t0=1.5000 latched=None ride mean=2215 ptp=18 ang=13
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=a t0=1.5000 latched=None ride mean=2804 ptp=60 ang=27
+  UNACCEPTABLE sensor_offset off=0.5 ref=2000 ch=a t0=1.5019 latched=None ride mean=2883 ptp=23 ang=13
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=a t0=1.5019 latched=None ride mean=2500 ptp=64 ang=26
+  UNACCEPTABLE sensor_offset off=0.5 ref=2000 ch=a t0=1.5037 latched=None ride mean=2565 ptp=21 ang=12
+  UNACCEPTABLE sensor_offset off=0.5 ref=2000 ch=a t0=1.5056 latched=None ride mean=2317 ptp=19 ang=13
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=a t0=1.5056 latched=None ride mean=2824 ptp=59 ang=26
+  UNACCEPTABLE sensor_offset off=0.5 ref=2000 ch=b t0=1.5000 latched=None ride mean=2304 ptp=19 ang=12
+  UNACCEPTABLE sensor_offset off=0.5 ref=2000 ch=b t0=1.5019 latched=None ride mean=2523 ptp=20 ang=12
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=b t0=1.5019 latched=None ride mean=2854 ptp=60 ang=26
+  UNACCEPTABLE sensor_offset off=0.5 ref=2000 ch=b t0=1.5037 latched=None ride mean=2612 ptp=21 ang=12
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=b t0=1.5037 latched=None ride mean=2584 ptp=62 ang=26
+
+Target >= 90% acceptable outcomes per group: FAILED

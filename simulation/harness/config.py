@@ -18,7 +18,7 @@ CONTROLLER_PARAMS = {
     'iq_ki': 3142.0,
     'spd_kp': 0.194,
     'spd_ki': 17.4,
-    'smo_k': 37.7,
+    'smo_k': 20.0,
     'smo_h': 0.5,
     'smo_lpf': 50.0,
     'flux_wc': 125.6,

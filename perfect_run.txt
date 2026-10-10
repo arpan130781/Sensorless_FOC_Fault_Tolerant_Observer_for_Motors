@@ -1,0 +1,169 @@
+gcc -Wall -Wextra -O2 -fPIC -shared src/fault_monitor.c src/flux_observer.c src/foc_core.c src/handoff.c src/if_startup.c src/observer_manager.c src/pi_controller.c src/smo.c -lm -o build/libfoc_controller.dylib
+Running standard scenarios...
+---------------------------------------------------------
+Running no_fault_baseline...
+
+Evaluation for no_fault_baseline:
+  max_angle_error      : PASS (value=7.75)
+  angle_error_rms      : PASS (value=3.37)
+  speed_ripple_ptp     : PASS (value=142.12)
+  mean_speed           : PASS (value=0.93)
+  expected_mode        : PASS (value=2.00)
+PASS (no_fault_baseline): Maintained stable control.
+---------------------------------------------------------
+Running scenario_1_rs_drift...
+
+Evaluation for scenario_1_rs_drift:
+  angle_error_rms      : PASS (value=3.33)
+  max_angle_error      : PASS (value=7.58)
+  mean_speed           : PASS (value=0.81)
+  speed_ripple_ptp     : PASS (value=129.79)
+  expected_mode        : PASS (value=2.00)
+PASS (scenario_1_rs_drift): Met all criteria.
+---------------------------------------------------------
+Running scenario_2_offset_a_2_0...
+
+Evaluation for scenario_2_offset_a_2_0:
+  detection_latency    : PASS (value=1.95)
+  fault_isolation      : PASS (value=1.00)
+  mean_speed           : PASS (value=0.79)
+  angle_error_rms      : PASS (value=3.39)
+  max_angle_error      : PASS (value=7.76)
+  speed_ripple_ptp     : PASS (value=144.20)
+  reconstruction_error_rms : PASS (value=0.09)
+  expected_mode        : PASS (value=3.00)
+PASS (scenario_2_offset_a_2_0): Met all criteria.
+---------------------------------------------------------
+Running scenario_3_stuck_b_2_0...
+
+Evaluation for scenario_3_stuck_b_2_0:
+  detection_latency    : PASS (value=2.05)
+  fault_isolation      : PASS (value=2.00)
+  mean_speed           : PASS (value=1.20)
+  angle_error_rms      : PASS (value=3.42)
+  max_angle_error      : PASS (value=27.31)
+  speed_ripple_ptp     : PASS (value=160.46)
+  reconstruction_error_rms : PASS (value=0.18)
+  expected_mode        : PASS (value=3.00)
+PASS (scenario_3_stuck_b_2_0): Met all criteria.
+---------------------------------------------------------
+Running scenario_4_stuck_a_limit...
+
+Evaluation for scenario_4_stuck_a_limit:
+  detection_latency    : PASS (value=1.95)
+  fault_isolation      : PASS (value=1.00)
+  mean_speed           : PASS (value=3.11)
+  angle_error_rms      : PASS (value=4.44)
+  max_angle_error      : PASS (value=48.97)
+  speed_ripple_ptp     : PASS (value=304.65)
+  reconstruction_error_rms : PASS (value=0.94)
+  expected_mode        : PASS (value=3.00)
+PASS (scenario_4_stuck_a_limit): Met all criteria.
+---------------------------------------------------------
+Running scenario_5_simultaneous...
+
+Evaluation for scenario_5_simultaneous:
+  detection_latency    : PASS (value=6.95)
+  fault_isolation      : FAIL (value=1.00)
+  mean_speed           : FAIL (value=1794.16)
+  angle_error_rms      : FAIL (value=85.84)
+  max_angle_error      : FAIL (value=179.99)
+  speed_ripple_ptp     : FAIL (value=840.30)
+  reconstruction_error_rms : FAIL (value=2.00)
+  expected_mode        : PASS (value=3.00)
+FAIL (scenario_5_simultaneous): Did not meet all criteria.
+Scenario scenario_5_simultaneous FAILED!
+---------------------------------------------------------
+Running scenario_6_noise_burst...
+
+Evaluation for scenario_6_noise_burst:
+  mean_speed           : PASS (value=0.90)
+  angle_error_rms      : PASS (value=3.36)
+  max_angle_error      : PASS (value=7.71)
+  speed_ripple_ptp     : PASS (value=126.74)
+  recovery_time        : PASS (value=0.50)
+  expected_mode        : PASS (value=2.00)
+PASS (scenario_6_noise_burst): Met all criteria.
+---------------------------------------------------------
+Running scenario_7_inductance_mismatch...
+
+Evaluation for scenario_7_inductance_mismatch:
+  mean_speed           : PASS (value=0.00)
+  angle_error_rms      : PASS (value=5.87)
+  max_angle_error      : PASS (value=12.56)
+  speed_ripple_ptp     : PASS (value=223.11)
+  expected_mode        : PASS (value=2.00)
+PASS (scenario_7_inductance_mismatch): Met all criteria.
+---------------------------------------------------------
+Running scenario_8_speed_reversal...
+
+Evaluation for scenario_8_speed_reversal:
+  mean_speed           : PASS (value=178.43)
+  angle_error_rms      : PASS (value=6.63)
+  max_angle_error      : PASS (value=120.46)
+  speed_ripple_ptp     : PASS (value=4304.24)
+  expected_mode        : PASS (value=2.00)
+PASS (scenario_8_speed_reversal): Met all criteria.
+---------------------------------------------------------
+Running scenario_9_load_step...
+
+Evaluation for scenario_9_load_step:
+  mean_speed           : PASS (value=1.29)
+  angle_error_rms      : PASS (value=2.98)
+  max_angle_error      : PASS (value=5.02)
+  speed_ripple_ptp     : PASS (value=69.56)
+  expected_mode        : PASS (value=2.00)
+PASS (scenario_9_load_step): Met all criteria.
+---------------------------------------------------------
+Running scenario_10_low_speed...
+
+Evaluation for scenario_10_low_speed:
+  mean_speed           : PASS (value=18.79)
+  angle_error_rms      : PASS (value=16.90)
+  max_angle_error      : PASS (value=75.53)
+  speed_ripple_ptp     : PASS (value=880.93)
+  expected_mode        : PASS (value=2.00)
+PASS (scenario_10_low_speed): Met all criteria.
+---------------------------------------------------------
+Running scenario_11_slow_ramp...
+
+Evaluation for scenario_11_slow_ramp:
+  mean_speed           : PASS (value=248.51)
+  angle_error_rms      : PASS (value=6.68)
+  max_angle_error      : PASS (value=16.40)
+  speed_ripple_ptp     : PASS (value=824.88)
+  expected_mode        : PASS (value=2.00)
+PASS (scenario_11_slow_ramp): Met all criteria.
+---------------------------------------------------------
+Running scenario_12_ambiguous_fault...
+
+Evaluation for scenario_12_ambiguous_fault:
+  mean_speed           : FAIL (value=1383.14)
+  angle_error_rms      : FAIL (value=100.16)
+  max_angle_error      : FAIL (value=179.98)
+  speed_ripple_ptp     : FAIL (value=1723.58)
+  expected_mode        : FAIL (value=3.00)
+FAIL (scenario_12_ambiguous_fault): Did not meet all criteria.
+Scenario scenario_12_ambiguous_fault FAILED!
+---------------------------------------------------------
+Running sensor-fault robustness sweep (target: >=90% acceptable outcomes per group)...
+144 runs
+
+fault                    ref    isolated   acceptable  worst case (ride-through)
+sensor_offset 0.5 A     1500    9/24 ( 38%)   24/24 (100%)  mean 1497 rpm, angle 14 deg
+sensor_offset 0.5 A     2000    7/24 ( 29%)   24/24 (100%)  mean 1969 rpm, angle 16 deg
+sensor_offset 2 A       1500   23/24 ( 96%)   23/24 ( 96%)  mean 910 rpm, angle 180 deg
+sensor_offset 2 A       2000   18/24 ( 75%)   18/24 ( 75%)  mean 908 rpm, angle 180 deg   <-- BELOW TARGET
+sensor_stuck            1500   24/24 (100%)   24/24 (100%)  mean 1499 rpm, angle 9 deg
+sensor_stuck            2000   24/24 (100%)   24/24 (100%)  mean 1999 rpm, angle 7 deg
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=a t0=1.5000 latched=c ride mean=932 ptp=158 ang=180
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=a t0=1.5019 latched=b ride mean=910 ptp=161 ang=180
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=b t0=1.5019 latched=c ride mean=908 ptp=158 ang=180
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=b t0=1.5037 latched=a ride mean=913 ptp=151 ang=180
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=c t0=1.5037 latched=a ride mean=931 ptp=154 ang=176
+  UNACCEPTABLE sensor_offset off=2 ref=2000 ch=c t0=1.5056 latched=b ride mean=916 ptp=189 ang=180
+  UNACCEPTABLE sensor_offset off=2 ref=1500 ch=b t0=1.5050 latched=c ride mean=910 ptp=152 ang=180
+
+Target >= 90% acceptable outcomes per group: FAILED
+Sweep did not meet the target.
+3 scenarios/tests failed.

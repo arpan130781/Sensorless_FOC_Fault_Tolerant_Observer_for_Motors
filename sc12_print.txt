@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/arpankailashgupta/Desktop/sensorless-foc-pio/simulation/harness/sil_runner.py", line 192, in <module>
+    runner = SILRunner(config_sim=SIM_PARAMS, fault_scenario=args.scenario)
+  File "/Users/arpankailashgupta/Desktop/sensorless-foc-pio/simulation/harness/sil_runner.py", line 65, in __init__
+    self.controller = FocController(lib_path)
+  File "/Users/arpankailashgupta/Desktop/sensorless-foc-pio/simulation/harness/c_bridge.py", line 69, in __init__
+    raise FileNotFoundError(f"CRITICAL: C library not found at {lib_path}. Run 'make lib' first.")
+FileNotFoundError: CRITICAL: C library not found at /Users/arpankailashgupta/Desktop/sensorless-foc-pio/build/libfoc_controller.dylib. Run 'make lib' first.

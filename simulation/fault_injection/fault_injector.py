@@ -64,24 +64,15 @@ class FaultInjector:
                 if ch == 'b': ib += self.rng.normal(0, mag)
                 if ch == 'c': ic += self.rng.normal(0, mag)
         elif t_type == 'simultaneous':
-            # handle multiple faults
+            # handle multiple faults by creating temporary single-fault configs
             faults = self.config.get('faults', [])
             for f in faults:
-                ft = f.get('type')
-                onset = f.get('onset_time', 0.0)
-                if t >= onset:
-                    ch = f.get('channel', 'a')
-                    if ft == 'sensor_stuck':
-                        if not hasattr(self, 'stuck_vals'):
-                            self.stuck_vals = {'a': ia, 'b': ib, 'c': ic}
-                        if ch == 'a': ia = self.stuck_vals['a']
-                        if ch == 'b': ib = self.stuck_vals['b']
-                        if ch == 'c': ic = self.stuck_vals['c']
-                    elif ft == 'sensor_offset':
-                        offset = f.get('offset', 0.5)
-                        if ch == 'a': ia += offset
-                        if ch == 'b': ib += offset
-                        if ch == 'c': ic += offset
+                # We can reuse the main logic by temporarily swapping self.config
+                temp_config = self.config
+                self.config = f
+                # Apply recursively
+                ia, ib, ic = self.corrupt_currents(ia, ib, ic, t)
+                self.config = temp_config
         
         return ia, ib, ic
 

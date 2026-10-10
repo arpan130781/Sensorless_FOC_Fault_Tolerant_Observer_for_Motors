@@ -1,19 +1,47 @@
+# Environments
 .venv/
+env/
 venv/
 __pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+*.pyc
+
+# Build products
 build/
 *.so
 *.dylib
-*.dll
+
+# Caches
+.pytest_cache/
+
+# Debug and temp files
+*.log
+*.tmp
+*.zip
+*.tar.gz
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# PlatformIO
+.pio/
+
+# Build artifacts
+build/
 *.o
 *.a
-*.orig
-*.bak
+*.so
+*.dylib
+
+# macOS
 .DS_Store
-__MACOSX/
+
+# IDE
 .vscode/
-.idea/
+
+# Temporary files
+*.tmp
+*.log

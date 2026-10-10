@@ -11,6 +11,8 @@ typedef struct {
     float i_a_rec;
     float i_b_rec;
     float i_c_rec;
+    float i_alpha_clean;
+    float i_beta_clean;
 } FaultStatus;
 
 typedef struct {
@@ -20,7 +22,9 @@ typedef struct {
     bool fault_latch_a, fault_latch_b, fault_latch_c;
     float clear_timer;
     float fault_isolation_timer;
+    float unresolved_fault_timer;
     float err_acc_A, err_acc_B, err_acc_C;
+    float E_acc;
     FaultStatus status;
 
     float prev_i_a, prev_i_b, prev_i_c;

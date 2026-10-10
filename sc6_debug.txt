@@ -1,0 +1,19 @@
+
+Evaluation for scenario_6_noise_burst:
+  mean_speed           : PASS (value=2.58)
+  angle_error_rms      : PASS (value=4.55)
+  max_angle_error      : PASS (value=12.34)
+  speed_ripple_ptp     : PASS (value=326.37)
+  recovery_time        : PASS (value=0.50)
+  expected_mode        : PASS (value=2.00)
+PASS (scenario_6_noise_burst): Met all criteria.
+AMBIGUOUS FAULT at t=0.002000, ia=6.572547, ib=-2.269819, ic=-3.001543
+AMBIGUOUS FAULT at t=0.003000, ia=3.113840, ib=0.938207, ic=-2.115490
+AMBIGUOUS FAULT at t=0.004000, ia=-1.652556, ib=2.149959, ic=-1.116096
+AMBIGUOUS FAULT at t=0.005000, ia=-2.881831, ib=1.279121, ic=-0.208248
+AMBIGUOUS FAULT at t=0.006000, ia=-2.647425, ib=0.439854, ic=1.728861
+AMBIGUOUS FAULT at t=0.007000, ia=4.490717, ib=-1.043272, ic=2.380280
+AMBIGUOUS FAULT at t=0.008000, ia=-1.316596, ib=-1.900831, ic=0.847539
+AMBIGUOUS FAULT at t=0.009000, ia=2.155917, ib=-0.833216, ic=-0.751049
+LATCHED: a=1, b=0, c=0 at t=0.010000
+UNLATCHED at clear_timer=0.500027

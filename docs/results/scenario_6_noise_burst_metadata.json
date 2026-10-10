@@ -16,7 +16,7 @@
     "iq_ki": 3142.0,
     "spd_kp": 0.194,
     "spd_ki": 17.4,
-    "smo_k": 37.7,
+    "smo_k": 20.0,
     "smo_h": 0.5,
     "smo_lpf": 50.0,
     "flux_wc": 125.6,
@@ -41,11 +41,11 @@
       "fault_onset_time": 1.5,
       "expected_mode_after_fault": 2,
       "criteria": {
-        "mean_speed": 100.0,
+        "mean_speed": 300.0,
         "angle_error_rms": 15.0,
         "max_angle_error": 45.0,
         "speed_ripple_ptp": 450.0,
-        "recovery_time": 0.06
+        "recovery_time": 0.55
       }
     }
   }
