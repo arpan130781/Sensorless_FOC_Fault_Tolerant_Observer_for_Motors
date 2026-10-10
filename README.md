@@ -1,156 +1,1394 @@
-# Sensorless FOC Simulation — Fault-Tolerant Observer on ESP32 (SIL)
+# Sensorless Field-Oriented Control with a Fault-Tolerant Observer
 
-This repository implements a highly sophisticated Sensorless Field-Oriented Control (FOC) algorithm for a Permanent Magnet Synchronous Motor (PMSM). It is designed to run bare-metal on the Espressif ESP32, and it leverages the target's single-precision FPU to maintain sub-microsecond control loops.
+### PMSM/BLDC Motor Control | C | Python | ESP32 | PlatformIO | Software-in-the-Loop Simulation
 
-Unlike standard FOC implementations which fail completely when a current sensor breaks or offsets, this project features a robust, model-assisted **Fault-Tolerant Hybrid Observer**. It is capable of detecting, mathematically isolating, and dynamically riding through severe single-sensor failures (e.g., stuck-at-limit, constant offset, and noise bursts). 
+A sensorless Field-Oriented Control (FOC) project that combines rotor-state estimation, model-assisted current-sensor fault detection, phase-current reconstruction, and software-in-the-loop (SIL) validation.
 
-By purely relying on mathematical reconstruction through an independent kinematics and state-predictor model, the system ensures the motor remains operational in critical industrial, drone, or automotive applications without needing hardware redundancy.
+The project investigates how a motor controller can respond when phase-current measurements become unreliable because of sensor offsets, stuck readings, transient noise, or simultaneous faults.
 
----
+The controller is implemented in C, while a Python-based simulation environment provides a motor model, fault injection, data logging, and automated evaluation.
 
-## 1. System Architecture
-
-The core FOC loop runs at 20 kHz, orchestrating Clarke/Park transforms, PI controllers, and Space Vector Modulation (SVM) to inject currents precisely. 
-
-However, sensorless estimation requires high-fidelity feedback. To achieve this, the system uses a **Hybrid Observer Structure**:
-- **High-Speed Operation:** Sliding Mode Observer (SMO). The SMO excels at extracting the back-EMF vectors during nominal and high-speed operation, utilizing a Sigmoid-based saturation function for reduced chatter.
-- **Low-Speed Operation:** Voltage-Model Flux Observer. At lower speeds where back-EMF is too small to overcome noise floors, a deterministic flux-integrator tracks the motor's state.
-- **Fusion:** A complementary frequency-domain filter seamlessly blends the outputs of both observers based on the current estimated electrical frequency, ensuring flawless crossover between regimes.
+> **Project status:** Software-in-the-loop development and validation. Physical ESP32 and motor validation, real-time execution profiling, and complete verification of all fault scenarios remain separate engineering tasks.
 
 ---
 
-## 2. Advanced Hybrid Fault Isolation
+## Table of Contents
 
-The standout feature of this repository is its fault injection and isolation state machine. The isolation stack avoids naive single-sample scalar bounds (which are highly susceptible to numerical instability during severe transients) in favor of a robust vector-distance strategy:
-
-1. **Flat-Line Detection:** Rapidly detects sensors that freeze at a constant limit (e.g., dead ADC). If a channel remains perfectly constant over a 1ms window while the motor is commanded to move, it is immediately latched and isolated.
-2. **Open-Loop Current Predictor:** An independent, parallel $\alpha\beta$ current predictor continually tracks expected phase currents based on the commanded output voltages and system impedance.
-3. **Centroid Vector Evaluation (The 1ms Window):** When Kirchhoff's Current Law (KCL) detects a summation error exceeding 0.3A, the system suspends standard operation and begins tracking an accumulated 2D $\alpha\beta$ error vector ($E_{acc}$). Over a 1ms window, this accumulated vector represents the physical centroid of the fault. The algorithm continuously calculates the geometric distance between the true error vector and three hypothetical single-phase fault vectors ($H_A$, $H_B$, $H_C$). The closest match isolates the broken channel.
-4. **Transient Shielding & Ambiguity Handling:** Not all faults are clean. High-frequency noise bursts, common-mode 3-phase offsets, or simultaneous failures can confuse standard isolation logic. If the fault centroid cannot be confidently matched to a single channel, the system enters a safe `LIMP` mode (Mode 4). In `LIMP` mode, torque limits are clamped, and the isolation state machine halts to prevent predictor drift from falsely latching a channel.
-5. **Recovery Debouncing:** Latched faults enforce a strict `RECOVERY_WINDOW` (0.5s) after KCL returns to nominal bounds before restoring `CLOSED_LOOP` operation, avoiding rapid switching on intermittent hardware.
+1. [Project Overview](#1-project-overview)
+2. [Objectives](#2-objectives)
+3. [System Architecture](#3-system-architecture)
+4. [Field-Oriented Control](#4-field-oriented-control)
+5. [Sensorless Rotor-State Estimation](#5-sensorless-rotor-state-estimation)
+6. [Fault Detection and Isolation](#6-fault-detection-and-isolation)
+7. [Phase-Current Reconstruction](#7-phase-current-reconstruction)
+8. [Fault-Handling Modes](#8-fault-handling-modes)
+9. [Software-in-the-Loop Simulation](#9-software-in-the-loop-simulation)
+10. [Fault Scenarios](#10-fault-scenarios)
+11. [Repository Structure](#11-repository-structure)
+12. [Prerequisites](#12-prerequisites)
+13. [Installation and Setup](#13-installation-and-setup)
+14. [Building and Running Tests](#14-building-and-running-tests)
+15. [Running Individual Scenarios](#15-running-individual-scenarios)
+16. [Robustness Testing](#16-robustness-testing)
+17. [ESP32 Build Configuration](#17-esp32-build-configuration)
+18. [Evaluation Metrics](#18-evaluation-metrics)
+19. [Motor and Controller Parameters](#19-motor-and-controller-parameters)
+20. [Current Validation Status](#20-current-validation-status)
+21. [Known Limitations](#21-known-limitations)
+22. [Future Work](#22-future-work)
+23. [Technologies Used](#23-technologies-used)
+24. [References](#24-references)
 
 ---
 
-## 3. Project Structure
+# 1. Project Overview
 
-The repository cleanly isolates the C implementation (which will be compiled for the ESP32) from the Python SIL (Software-in-the-Loop) simulation harness.
+Field-Oriented Control is widely used for controlling permanent-magnet synchronous motors because it provides independent regulation of flux-producing and torque-producing current components.
+
+Conventional sensorless FOC estimates rotor position and speed using electrical measurements instead of relying exclusively on an encoder or resolver.
+
+However, sensorless control becomes more difficult when current measurements are corrupted.
+
+A faulty phase-current measurement can affect:
+
+- Clarke and Park transformations.
+- Current feedback used by the PI controllers.
+- Back-EMF and rotor-position estimation.
+- Speed estimation.
+- Fault diagnosis.
+- Overall closed-loop stability.
+
+This project explores a model-assisted approach to detecting and handling such failures.
+
+The software combines:
+
+1. A C-based FOC control implementation.
+2. A Sliding Mode Observer (SMO).
+3. A voltage-model flux observer.
+4. An observer-management mechanism.
+5. A phase-current fault monitor.
+6. An independent current predictor.
+7. Fault isolation using competing phase-fault hypotheses.
+8. Reconstruction of a suspected faulty phase current.
+9. A Python PMSM simulation environment.
+10. Automated fault-injection scenarios and evaluation metrics.
+
+The controller and simulation are designed to work together so that changes to the C implementation can be evaluated under repeatable operating conditions.
+
+The primary emphasis is on **sensorless estimation, fault diagnosis, and software-level validation**, rather than claiming completed hardware deployment.
+
+---
+
+# 2. Objectives
+
+The principal objectives of the project are:
+
+- Implement the core FOC control logic in C.
+- Estimate rotor electrical position and speed without using a rotor-position sensor in the observer feedback path.
+- Implement and evaluate multiple observer approaches.
+- Compare observer estimates and use confidence indicators to support estimator selection.
+- Detect inconsistent three-phase current measurements.
+- Identify a potentially faulty current-sensor channel using model-based evidence.
+- Reconstruct the current of a confidently isolated phase.
+- Provide degraded operating modes for faults that cannot be confidently isolated.
+- Simulate sensor failures, parameter mismatches, and operating-point changes.
+- Evaluate angle estimation, speed tracking, fault detection, isolation, and current reconstruction.
+- Maintain a development path toward testing on an ESP32 target.
+
+---
+
+# 3. System Architecture
+
+The project separates the embedded-oriented control implementation from the simulation and evaluation environment.
+
+## 3.1 High-Level Architecture
 
 ```text
-.
-├── src/                    # C FOC implementation (ESP32-ready, strict float-only)
-│   ├── fault_monitor.c     # Vector centroid fault isolation & state machine
-│   ├── flux_observer.c     # Low-speed flux observer
-│   ├── foc_core.c          # Main FOC orchestrator
-│   ├── handoff.c           # Mode transition FSM (ALIGN -> OPEN_LOOP -> CLOSED_LOOP)
-│   ├── observer_manager.c  # Observer fusion (Complementary Filter)
-│   ├── pi_controller.c     # PI loop with anti-windup clamping
-│   └── smo.c               # Sliding Mode Observer
-├── simulation/             # Python SIL Harness
-│   ├── plant/              # RK4 PMSM and Inverter physical models
-│   ├── fault_injection/    # Yaml scenarios and signal corruptors
-│   ├── analysis/           # Metrics generation and matplotlib plotting
-│   └── harness/            # ctypes bridge connecting Python to the C shared library
-├── scripts/                # Build and test orchestration
-├── tests/                  # Pytest unit tests for C code execution
-└── Makefile                # Cross-platform build system
+                 Speed / Torque Reference
+                           |
+                           v
+                +---------------------+
+                | Startup and Handoff |
+                | State Machine       |
+                +---------------------+
+                           |
+                           v
+Measured Phase Currents --> Fault Monitor
+                           |
+                           | Healthy measurements
+                           | or reconstructed current
+                           v
+                +---------------------+
+                | Clarke Transform    |
+                | abc -> alpha-beta   |
+                +---------------------+
+                           |
+                           v
+                +---------------------+
+                | Sensorless Observer |
+                |                     |
+                | Sliding Mode        |
+                | Observer            |
+                |                     |
+                | Flux Observer       |
+                +---------------------+
+                           |
+                           v
+                +---------------------+
+                | Observer Manager    |
+                | Confidence and      |
+                | Disagreement        |
+                +---------------------+
+                           |
+                           v
+                +---------------------+
+                | Park Transform      |
+                | alpha-beta -> d-q   |
+                +---------------------+
+                           |
+                           v
+                +---------------------+
+                | PI Controllers      |
+                | d-axis / q-axis     |
+                | Speed Regulation    |
+                +---------------------+
+                           |
+                           v
+                +---------------------+
+                | Inverse Park        |
+                | and SVM             |
+                +---------------------+
+                           |
+                           v
+                   PWM Duty Outputs
+                           |
+                           v
+                    Motor / Inverter
 ```
 
+The Python simulation supplies the motor and inverter model, while the compiled C library executes the controller logic.
+
+## 3.2 Software Components
+
+| Component | Responsibility |
+|---|---|
+| FOC core | Coordinates transformations, observers, controllers, and output generation |
+| PI controllers | Regulate current and speed |
+| Sliding Mode Observer | Estimates current states and back-EMF-related quantities |
+| Flux observer | Estimates rotor flux and electrical angle |
+| Observer manager | Evaluates observer confidence and disagreement |
+| Fault monitor | Detects inconsistent current measurements and evaluates phase-fault hypotheses |
+| Startup and handoff | Manages alignment, open-loop startup, and closed-loop transition |
+| PMSM plant | Simulates motor electrical and mechanical behaviour |
+| Fault injector | Corrupts measurements or changes model parameters |
+| SIL runner | Connects the Python plant to the compiled C controller |
+| Metrics module | Evaluates simulation performance against configured criteria |
+
 ---
 
-## 4. Motor Parameters
+# 4. Field-Oriented Control
 
-The default configuration targets a standard 100W Surface-mounted Permanent Magnet (SPM) motor.
+## 4.1 Why FOC Is Used
 
-| Parameter | Symbol | Value |
-|-----------|--------|-------|
-| Stator Resistance | $R_s$ | $0.5 \Omega$ |
-| Stator Inductance | $L_s$ | $1.0$ mH |
-| Flux Linkage | $\psi_f$ | $0.015$ Wb |
-| Pole Pairs | $P$ | $4$ |
-| Inertia | $J$ | $0.0001$ kg·m² |
-| Damping | $B$ | $0.001$ N·m·s/rad |
-| Nominal Current | $I_n$ | $5.0$ A peak |
-| Bus Voltage | $V_{bus}$| $24.0$ V |
+FOC transforms three-phase AC quantities into a rotating reference frame aligned with the estimated rotor magnetic field.
+
+In this reference frame:
+
+- The d-axis current, `i_d`, is associated with flux.
+- The q-axis current, `i_q`, is associated with torque production.
+
+This representation allows the controller to regulate the two current components using PI controllers.
+
+## 4.2 Clarke Transformation
+
+The Clarke transform converts three-phase quantities into a stationary two-axis reference frame.
+
+For a balanced three-phase system, one common amplitude-invariant convention is:
+
+```text
+i_alpha = (2/3) * (i_a - 0.5*i_b - 0.5*i_c)
+
+i_beta  = (2/3) * ((sqrt(3)/2)*i_b
+                   - (sqrt(3)/2)*i_c)
+```
+
+The resulting `alpha-beta` currents are used by the sensorless observers.
+
+The precise transform convention must remain consistent throughout the implementation.
+
+## 4.3 Park Transformation
+
+The Park transform converts stationary-frame current quantities into a rotating reference frame using the estimated electrical rotor angle.
+
+```text
+i_d =  i_alpha*cos(theta_hat)
+     + i_beta*sin(theta_hat)
+
+i_q = -i_alpha*sin(theta_hat)
+     + i_beta*cos(theta_hat)
+```
+
+Here, `theta_hat` represents the estimated electrical rotor angle.
+
+The resulting d-axis and q-axis currents are compared with their respective references.
+
+## 4.4 Current and Speed Control
+
+The controller uses PI control to regulate current and speed.
+
+The d-axis and q-axis controllers generate voltage references:
+
+```text
+v_d
+v_q
+```
+
+A speed-control loop adjusts the torque-producing current reference according to the difference between requested and estimated speed.
+
+The control system then converts the d-q voltage commands back into stationary and three-phase quantities.
+
+## 4.5 Inverse Transformation and Space-Vector Modulation
+
+The inverse Park transform converts d-q voltage commands back to stationary coordinates.
+
+The controller then calculates three phase-equivalent voltage commands.
+
+Space Vector Modulation (SVM) determines the inverter duty ratios needed to approximate the requested voltage vector.
+
+The implementation includes common-mode voltage injection and voltage-vector scaling when the requested vector exceeds the configured DC-bus limit.
+
+The resulting duty ratios are returned to the caller.
+
+Actual PWM generation, ADC synchronisation, and inverter timing must be validated on the target hardware.
 
 ---
 
-## 5. Prerequisites & Quick Start
+# 5. Sensorless Rotor-State Estimation
 
-### Prerequisites
-- Python 3.8+
-- A working C compiler (`gcc` or `clang`)
-- Python packages (installed in the virtual environment): `numpy`, `scipy`, `matplotlib`, `pyyaml`, `pytest`
+The repository contains two observer implementations:
 
-### Building and Running the Test Suite (Step-by-Step for Beginners)
+1. Sliding Mode Observer.
+2. Voltage-model flux observer.
 
-If you just downloaded this code and want to run the simulations to see the motor spin on your screen, follow these exact steps in your terminal:
+An observer manager evaluates their estimates and confidence indicators.
 
-**Step 1: Set up the Python environment**
-This installs all the required math and graphing tools (like `numpy` and `matplotlib`) into an isolated folder so it doesn't mess up your computer.
+## 5.1 Sliding Mode Observer
+
+The Sliding Mode Observer estimates the motor's electrical behaviour using the stator voltage model and current feedback.
+
+The observer maintains estimated alpha-beta currents and compares them with the measured currents.
+
+The difference between estimated and measured current is used to calculate a correction term.
+
+Conceptually:
+
+```text
+error_alpha = i_alpha_hat - i_alpha_measured
+
+error_beta = i_beta_hat - i_beta_measured
+```
+
+A saturation function limits the correction signal near zero error.
+
+The observer uses this correction to update its internal current estimates.
+
+The resulting switching information is filtered to obtain back-EMF-related estimates.
+
+These estimates are used to calculate rotor electrical angle and speed.
+
+### Why Use an SMO?
+
+A Sliding Mode Observer can provide useful back-EMF estimates over suitable operating regions.
+
+However, its performance depends on factors including:
+
+- Motor resistance and inductance.
+- Observer gains.
+- Current measurement quality.
+- Applied-voltage accuracy.
+- Sampling interval.
+- Operating speed.
+- Filtering and noise.
+
+The observer must therefore be evaluated under different operating conditions rather than assumed to be reliable at every speed.
+
+## 5.2 Voltage-Model Flux Observer
+
+The flux observer estimates stator flux using the voltage-model relationship.
+
+Conceptually:
+
+```text
+d(psi_s)/dt = v_s - Rs*i_s
+```
+
+where:
+
+- `psi_s` is stator flux.
+- `v_s` is stator voltage.
+- `Rs` is stator resistance.
+- `i_s` is stator current.
+
+The observer uses voltage and current information to estimate the flux associated with the rotor.
+
+Electrical angle can then be derived from the estimated flux components.
+
+### Why Use a Second Observer?
+
+The SMO and flux observer rely on related but different estimation mechanisms.
+
+Comparing their outputs provides additional information about estimation quality.
+
+The flux observer can be useful in operating regions where the SMO's back-EMF estimate becomes less informative.
+
+However, voltage-model integration can be sensitive to parameter mismatch, voltage offsets, and accumulated numerical error.
+
+The actual operating range of each observer must be established experimentally.
+
+## 5.3 Observer Management
+
+The observer manager maintains quantities including:
+
+- SMO electrical angle.
+- Flux-observer electrical angle.
+- Observer disagreement.
+- Back-EMF magnitude.
+- SMO health.
+- Flux-observer health.
+- Observer confidence values.
+
+The implementation uses heuristic health indicators and confidence values to select or blend estimates.
+
+Angular disagreement must be calculated using wrapped angular differences because angles near `+pi` and `-pi` are close in physical terms even though their numerical difference is large.
+
+When estimates are blended, circular-angle averaging is more appropriate than directly averaging angles across the wrap boundary.
+
+**Important:** The observer manager is a heuristic estimator-selection mechanism. Its presence does not prove flawless crossover, universal low-speed observability, or immunity to measurement faults.
+
+---
+
+# 6. Fault Detection and Isolation
+
+Fault detection and fault isolation are separate problems.
+
+**Fault detection** determines whether measurements appear inconsistent.
+
+**Fault isolation** attempts to identify which measurement channel is responsible.
+
+The distinction is important because a three-phase current-sum residual can indicate a problem without uniquely identifying the faulty phase.
+
+## 6.1 Kirchhoff's Current Law Residual
+
+For a balanced three-wire motor without a neutral-current path:
+
+```text
+i_a + i_b + i_c approximately equals zero
+```
+
+The fault monitor calculates:
+
+```text
+E = i_a + i_b + i_c
+```
+
+The inspected implementation uses a KCL threshold of approximately `0.3 A`.
+
+A fault condition is indicated when:
+
+```text
+abs(E) > KCL_THRESH
+```
+
+This check is computationally inexpensive and can detect inconsistent current measurements.
+
+However, it is not sufficient by itself to identify the faulty phase.
+
+Real hardware can also exhibit residuals because of:
+
+- Current-sensor offsets.
+- ADC noise.
+- Sampling skew.
+- PWM switching transients.
+- Measurement calibration errors.
+
+The threshold therefore requires validation against the actual measurement system.
+
+## 6.2 Stuck-Sensor Detection
+
+The fault monitor maintains the previous sample and a counter for each phase.
+
+Conceptually:
+
+```text
+if abs(current_now - current_previous) < threshold:
+    increment_stuck_counter
+else:
+    reset_stuck_counter
+```
+
+The implementation uses a small current-change threshold to identify nearly constant measurements.
+
+During fault isolation, a sufficiently large stuck counter can support selecting that phase as the fault hypothesis.
+
+This approach is intended to detect a measurement that remains nearly constant while the motor is operating.
+
+However, a flat-line detector must distinguish an actual failed sensor from a genuine steady current.
+
+In hardware, the threshold must account for ADC resolution, quantisation, noise, and expected current dynamics.
+
+## 6.3 Independent Current Predictor
+
+The fault monitor contains an independent alpha-beta current predictor.
+
+It uses the motor's electrical model and a last-known-good rotor-state estimate to predict expected current behaviour.
+
+The general stator-current relationship is:
+
+```text
+L * di/dt = v - R*i - e
+```
+
+where:
+
+- `L` is stator inductance.
+- `R` is stator resistance.
+- `v` is applied voltage.
+- `i` is stator current.
+- `e` is the back-EMF estimate.
+
+The predictor integrates the electrical model forward in time.
+
+When current measurements appear healthy, the predictor is corrected toward the measured alpha-beta currents.
+
+When measurements appear inconsistent, the monitor relies more heavily on its stored state and prediction.
+
+The predictor provides an independent reference for evaluating competing phase-fault hypotheses.
+
+It is still model-dependent: inaccurate motor parameters, voltage reconstruction errors, or an unreliable stored state can reduce its effectiveness.
+
+## 6.4 Competing Phase-Fault Hypotheses
+
+For a three-wire motor, the phase-current constraint allows a missing phase current to be reconstructed from the other two.
+
+The fault monitor evaluates three hypotheses.
+
+### Hypothesis A: Phase A Is Faulty
+
+```text
+i_a_reconstructed = -(i_b + i_c)
+```
+
+### Hypothesis B: Phase B Is Faulty
+
+```text
+i_b_reconstructed = -(i_a + i_c)
+```
+
+### Hypothesis C: Phase C Is Faulty
+
+```text
+i_c_reconstructed = -(i_a + i_b)
+```
+
+For each hypothesis, the monitor compares the reconstructed current and remaining measured currents with the independent predictor's expected phase currents.
+
+The accumulated errors provide a basis for comparing the hypotheses.
+
+The objective is to identify the hypothesis that best explains the observed measurements.
+
+## 6.5 Isolation Window and Confidence
+
+The implementation accumulates fault-isolation evidence over a configured time window.
+
+The monitor evaluates the accumulated errors for the three hypotheses.
+
+The winning hypothesis must satisfy confidence conditions before it is accepted.
+
+The implementation also requires repeated confident decisions before latching a phase fault.
+
+This is intended to reduce false isolation caused by a single anomalous sample.
+
+If the monitor cannot confidently isolate a phase within its configured time limit, it can mark the fault as ambiguous.
+
+These thresholds are implementation parameters, not universal constants. Their effectiveness must be evaluated across sensor noise, speed, load, and parameter variation.
+
+## 6.6 Recovery Logic
+
+The fault monitor includes a healthy-current recovery interval before clearing latched fault state.
+
+This is intended to prevent immediate switching back to normal operation after a temporary return to healthy measurements.
+
+The actual recovery behaviour must be evaluated using simulation logs and the fault-state transition logic.
+
+---
+
+# 7. Phase-Current Reconstruction
+
+When the monitor confidently isolates one faulty current channel, the faulty measurement can be replaced using the other two phase measurements.
+
+For example, if Phase A is isolated:
+
+```text
+i_a_reconstructed = -(i_b + i_c)
+```
+
+If Phase B is isolated:
+
+```text
+i_b_reconstructed = -(i_a + i_c)
+```
+
+If Phase C is isolated:
+
+```text
+i_c_reconstructed = -(i_a + i_b)
+```
+
+The reconstructed current is intended to maintain a physically consistent three-phase current vector.
+
+This reconstructed measurement can then be used by the control algorithm in place of the suspected faulty measurement.
+
+The output structure exposes:
+
+- The identified fault channel.
+- Reconstructed Phase A current.
+- Reconstructed Phase B current.
+- Reconstructed Phase C current.
+
+In the SIL environment, reconstructed currents can be compared with the simulated plant's true currents.
+
+This allows the reconstruction error to be quantified.
+
+A physical controller would not have access to the plant's true currents, so this ground-truth comparison is available only during simulation or laboratory measurement with independent instrumentation.
+
+**Limitation:** Reconstruction is most defensible when a single phase is confidently isolated and the other two measurements remain sufficiently reliable. Simultaneous faults can invalidate the assumptions behind single-phase reconstruction.
+
+---
+
+# 8. Fault-Handling Modes
+
+The controller defines several operating modes.
+
+| Code | Mode | Intended Role |
+|---:|---|---|
+| 0 | ALIGN | Initial rotor-alignment stage |
+| 1 | OPEN_LOOP | Open-loop startup before sensorless handoff |
+| 2 | CLOSED_LOOP | Normal observer-based control |
+| 3 | DEGRADED | Operation with an isolated faulty current channel |
+| 4 | LIMP | Limited or degraded response when the fault is ambiguous |
+| 5 | SAFE_STOP | Configured safe-stop response |
+| 6 | FAULT_DETECTED | Additional fault-state enumeration |
+
+The startup and handoff state machine manages the transition from alignment and open-loop operation to closed-loop operation.
+
+The fault monitor can request a degraded state when a phase fault is isolated.
+
+An ambiguous fault should not automatically be treated as a known single-phase failure.
+
+The intended behaviour is to enter a limited mode rather than confidently reconstructing a phase from invalid assumptions.
+
+The actual transition and recovery behaviour must be checked against the source and verified through the configured scenarios.
+
+The SAFE_STOP duty-cycle behaviour in software must also be validated against the real inverter and gate-driver design before hardware deployment.
+
+---
+
+# 9. Software-in-the-Loop Simulation
+
+The Python SIL environment evaluates the compiled C controller against a simulated motor and inverter.
+
+It provides a repeatable way to investigate control behaviour and fault responses without requiring a physical motor for every development iteration.
+
+## 9.1 Simulation Flow
+
+The simulation conceptually performs the following operations:
+
+1. Initialise the PMSM model and controller.
+2. Generate motor electrical and mechanical state.
+3. Obtain the plant's phase currents.
+4. Apply configured sensor faults to the controller-visible measurements.
+5. Pass the measurements and bus voltage to the C controller.
+6. Execute the controller's FOC and observer logic.
+7. Obtain the calculated PWM duty ratios.
+8. Convert the duty ratios into phase voltages for the plant.
+9. Integrate the motor model.
+10. Record measured signals, estimated state, true plant state, and control mode.
+11. Calculate metrics and compare them with the scenario's acceptance criteria.
+
+The compiled C library is called through a Python-to-C bridge.
+
+This allows the controller implementation to be tested without rewriting the control algorithm in Python.
+
+## 9.2 Plant Model
+
+The simulation includes a PMSM model with electrical and mechanical dynamics.
+
+The plant models quantities such as:
+
+- Phase currents.
+- Electrical rotor position.
+- Mechanical speed.
+- Electromagnetic torque.
+- Applied voltage.
+- Load torque.
+- Motor resistance and inductance.
+
+The inverter model converts controller duty ratios into phase-voltage quantities.
+
+The fidelity of simulation results depends on the accuracy of these models and their parameterisation.
+
+SIL results are evidence about the simulated system, not proof of performance on physical hardware.
+
+## 9.3 Fault Injection
+
+The fault injector supports several fault types.
+
+| Fault Type | Description |
+|---|---|
+| `none` | Nominal operation without an injected sensor fault |
+| `sensor_offset` | Adds a constant bias to a selected phase measurement |
+| `sensor_stuck` | Freezes a selected measurement |
+| `sensor_stuck_limit` | Forces a selected measurement to a configured limit |
+| `noise_burst` | Adds noise over a finite time interval |
+| `parameter_drift` | Changes a motor-model parameter after a configured onset |
+| `simultaneous` | Applies multiple configured fault entries |
+
+The scenario YAML file defines the parameters and expected evaluation criteria for each scenario.
+
+A configured disturbance should only be considered tested after verifying that the simulation runner actually applies it and evaluates the expected behaviour.
+
+For example, sensor faults, load steps, speed reversals, and speed ramps are handled by different parts of the simulation code.
+
+The YAML configuration alone does not prove that a scenario passed.
+
+---
+
+# 10. Fault Scenarios
+
+The repository defines a baseline and twelve additional scenarios in:
+
+```text
+simulation/fault_injection/fault_scenarios.yaml
+```
+
+The scenarios are intended to evaluate nominal behaviour, sensor faults, model mismatch, and dynamic operating conditions.
+
+| Scenario | Purpose |
+|---|---|
+| `no_fault_baseline` | Establishes nominal control and observer performance |
+| `scenario_1_rs_drift` | Evaluates behaviour under stator-resistance mismatch |
+| `scenario_2_offset_a_2_0` | Tests a constant offset on Phase A |
+| `scenario_3_stuck_b_2_0` | Tests a stuck Phase B measurement |
+| `scenario_4_stuck_a_limit` | Tests a severe stuck-at-limit fault on Phase A |
+| `scenario_5_simultaneous` | Combines a Phase C offset with a load-step configuration |
+| `scenario_6_noise_burst` | Tests a transient noise burst on Phase A |
+| `scenario_7_inductance_mismatch` | Evaluates behaviour under stator-inductance mismatch |
+| `scenario_8_speed_reversal` | Tests a configured speed reversal |
+| `scenario_9_load_step` | Tests response to a sudden load-torque change |
+| `scenario_10_low_speed` | Evaluates observer behaviour at a lower speed reference |
+| `scenario_11_slow_ramp` | Tests a configured slow speed ramp |
+| `scenario_12_ambiguous_fault` | Tests simultaneous current-sensor offsets intended to challenge unique phase isolation |
+
+## 10.1 What Each Group Evaluates
+
+### Nominal Operation
+
+The baseline checks whether the controller can start, estimate rotor state, and operate in closed loop without an injected fault.
+
+### Sensor Offsets and Stuck Measurements
+
+These scenarios evaluate the KCL residual, stuck-sensor detection, competing phase hypotheses, fault latching, and current reconstruction.
+
+### Transient Noise
+
+The noise-burst scenario evaluates the response to a temporary measurement disturbance and the controller's behaviour after the disturbance ends.
+
+### Motor-Parameter Mismatch
+
+Resistance and inductance changes test the sensitivity of the controller and observers to imperfect motor models.
+
+### Dynamic Operation
+
+Speed reversal, load-step, low-speed, and slow-ramp configurations are intended to evaluate tracking under changing operating conditions.
+
+### Ambiguous Simultaneous Faults
+
+The ambiguous-fault scenario is particularly important.
+
+When multiple measurements are corrupted, the assumption that exactly one phase is faulty may no longer hold.
+
+The controller should not claim successful single-phase isolation unless the evidence supports that conclusion.
+
+The configured expected mode and estimation criteria must be checked against the actual simulation results.
+
+> **Validation policy:** A scenario is considered passing only when the current code executes it and all configured acceptance criteria pass. Scenarios that have not been executed, have failed, or have incomplete results must not be described as passing.
+
+---
+
+# 11. Repository Structure
+
+The principal project components are organised as follows:
+
+```text
+sensorless-foc-pio/
+|
+|-- src/
+|   |-- foc_core.c
+|   |-- foc_api.h
+|   |-- fault_monitor.c
+|   |-- fault_monitor.h
+|   |-- smo.c
+|   |-- smo.h
+|   |-- flux_observer.c
+|   |-- flux_observer.h
+|   |-- observer_manager.c
+|   |-- observer_manager.h
+|   |-- pi_controller.c
+|   |-- pi_controller.h
+|   |-- handoff.c
+|   |-- handoff.h
+|   |-- if_startup.c
+|   |-- if_startup.h
+|   |-- motor_params.h
+|   `-- tests/
+|       `-- test_transforms.c
+|
+|-- simulation/
+|   |-- analysis/
+|   |   `-- metrics.py
+|   |
+|   |-- fault_injection/
+|   |   |-- fault_injector.py
+|   |   `-- fault_scenarios.yaml
+|   |
+|   |-- harness/
+|   |   |-- c_bridge.py
+|   |   |-- config.py
+|   |   `-- sil_runner.py
+|   |
+|   |-- plant/
+|   |   |-- pmsm_model.py
+|   |   `-- inverter_model.py
+|   |
+|   `-- test_scenarios.py
+|
+|-- scripts/
+|   |-- run_all_scenarios.sh
+|   `-- isolation_sweep.py
+|
+|-- Makefile
+|-- platformio.ini
+|-- requirements.txt
+|-- setup_env.sh
+|-- LICENSE
+|-- .gitignore
+`-- README.md
+```
+
+The exact contents may evolve as development continues. This is a conceptual overview of the principal components rather than an exhaustive listing of every file.
+
+## 11.1 Important Files
+
+| File | Responsibility |
+|---|---|
+| `src/foc_core.c` | Main FOC control-cycle implementation |
+| `src/foc_api.h` | Controller input/output structures and mode definitions |
+| `src/fault_monitor.c` | Current-sensor fault detection, isolation, and reconstruction logic |
+| `src/smo.c` | Sliding Mode Observer |
+| `src/flux_observer.c` | Voltage-model flux observer |
+| `src/observer_manager.c` | Observer health, confidence, and disagreement |
+| `src/pi_controller.c` | PI controller implementation |
+| `src/handoff.c` | Startup and control-mode handoff |
+| `src/if_startup.c` | Initial I/F-style startup logic |
+| `src/motor_params.h` | Motor and controller parameter definitions |
+| `simulation/plant/` | PMSM and inverter simulation models |
+| `simulation/fault_injection/fault_injector.py` | Sensor-fault and parameter-mismatch injection |
+| `simulation/fault_injection/fault_scenarios.yaml` | Scenario configurations and acceptance criteria |
+| `simulation/harness/c_bridge.py` | Python interface to the compiled C library |
+| `simulation/harness/sil_runner.py` | Simulation orchestration and result collection |
+| `simulation/analysis/metrics.py` | Performance metrics and acceptance checks |
+| `scripts/run_all_scenarios.sh` | Batch scenario execution and sweep orchestration |
+| `scripts/isolation_sweep.py` | Parameterised fault-isolation robustness testing |
+| `Makefile` | Native build and test commands |
+| `platformio.ini` | PlatformIO configuration for the ESP32 development target |
+
+---
+
+# 12. Prerequisites
+
+The project uses a C compiler for the controller and Python for simulation and testing.
+
+Required tools:
+
+- Python 3.8 or later.
+- GCC or Clang.
+- GNU Make.
+- Git, if cloning the repository.
+- PlatformIO CLI, for the embedded-target build.
+
+Python dependencies are listed in `requirements.txt` and may include:
+
+- NumPy
+- SciPy
+- Matplotlib
+- PyYAML
+- pytest
+
+The PlatformIO ESP32 build requires its corresponding platform and toolchain packages.
+
+---
+
+# 13. Installation and Setup
+
+## 13.1 Clone the Repository
+
+```bash
+git clone https://github.com/arpan130781/Sensorless_FOC_Fault_Tolerant_Observer_for_Motors.git
+
+cd Sensorless_FOC_Fault_Tolerant_Observer_for_Motors
+```
+
+If the local folder is named `sensorless-foc-pio`, enter that folder instead.
+
+## 13.2 Create the Python Environment
+
+Run:
+
 ```bash
 ./setup_env.sh
+```
+
+Then activate the environment:
+
+```bash
 source .venv/bin/activate
 ```
 
-**Step 2: Build the C code**
-This compiles the raw C code (the actual motor controller) into a shared library that the Python simulation can talk to.
+If the setup script cannot be executed:
+
+```bash
+chmod +x setup_env.sh
+./setup_env.sh
+```
+
+## 13.3 Install Dependencies Manually
+
+If required:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Verify the Python version:
+
+```bash
+python --version
+```
+
+Verify pytest:
+
+```bash
+python -m pytest --version
+```
+
+---
+
+# 14. Building and Running Tests
+
+Run commands from the repository root.
+
+## 14.1 Clean Previous Native Build Artifacts
+
 ```bash
 make clean
+```
+
+This removes the native build directory used by the Makefile.
+
+## 14.2 Build the C Controller
+
+```bash
 make lib
 ```
 
-**Step 3: Run the basic tests**
-This makes sure the math is correct and that the Python simulation can successfully communicate with the C code.
+The Makefile compiles the C source files into a shared library.
+
+On macOS, the configured output extension is `.dylib`.
+
+On Linux, the configured output extension is `.so`.
+
+The Python bridge loads this library so the SIL runner can execute the C controller.
+
+## 14.3 Run the Native C Tests
+
+```bash
+make test
+```
+
+This target builds and runs the native C tests configured by the Makefile.
+
+## 14.4 Run the Complete Unit-Test Target
+
 ```bash
 make test-all
 ```
 
-**Step 4: Run the Scenarios (The Fun Part!)**
-This runs the motor through 12 different brutal tests (like injecting electrical noise, faking broken sensors, and suddenly changing the speed). It will print out a scorecard showing how the controller survived each one.
-```bash
-./scripts/run_all_scenarios.sh
-```
+This executes the native C tests followed by the Python tests under `simulation/`.
 
-**Bonus: Look at the graphs!**
-If you want to visually see the motor's speed, electrical currents, and when a fault happens, run this command. It will open an interactive graph on your screen.
-```bash
-python simulation/harness/sil_runner.py --scenario scenario_6_noise_burst --plot
-```
-*(You can change `scenario_6_noise_burst` to any scenario name from the table below to see different graphs!)*
+A successful command exit is useful evidence, but inspect the complete output to verify that all expected tests actually ran.
 
+If a test fails, investigate the failing assertion and determine whether the implementation, test expectation, or configuration is incorrect.
+
+Do not change an acceptance threshold merely to turn a failing test into a passing test.
 
 ---
 
-## 6. Validation Scenarios (Software-in-the-Loop)
+# 15. Running Individual Scenarios
 
-The SIL environment evaluates the controller against the following strict scenarios. The fault monitor dynamically recovers tracking and maintains safe control post-fault. All 12 scenarios pass successfully.
+The SIL runner accepts a scenario name from the YAML configuration.
 
-| Scenario | Type | Description |
-|----------|------|-------------|
-| `no_fault_baseline` | Nominal | Accelerates smoothly and hands off to CLOSED_LOOP without issue. |
-| `scenario_1_rs_drift` | Plant Mismatch | Simulates thermal heating ($R_s$ increases). SMO natively rides through the disturbance. |
-| `scenario_2_offset_a_2_0` | Constant Offset | 2.0A constant offset injected into Phase A. Correctly isolated in <2ms. |
-| `scenario_3_stuck_b_2_0` | Sensor Stuck | Phase B freezes at 2.0A. Correctly isolated via vector check. |
-| `scenario_4_stuck_a_limit` | Hard Fault | Phase A jumps to ADC maximum (10A). Centroid evaluation perfectly isolates without observer explosion. *(Note: This scenario uses an adjusted maximum electrical angle-error tolerance of 65.0 degrees. This is strictly an acceptance-criteria relaxation to account for the physical severity of the fault limit jump, not a modification to the observer's internal reconstruction algorithms.)* |
-| `scenario_5_simultaneous` | Load + Fault | 2.0A offset on C alongside a sudden load torque step. |
-| `scenario_6_noise_burst` | Transient Noise | 100ms blast of severe 2.0A noise. Safely enters LIMP, rides out the storm, then autonomously recovers to CLOSED_LOOP. |
-| `scenario_7_inductance_mismatch` | Plant Mismatch | $L_s$ differs by 20% from the internal model. |
-| `scenario_8_speed_reversal` | Dynamic | Command speed jumps aggressively from 500 RPM to -2000 RPM. |
-| `scenario_9_load_step` | Disturbance | Sudden 0.1Nm load torque step. |
-| `scenario_10_low_speed` | Dynamic | Sustained low-speed operation at 500 RPM to test the Flux Observer fusion. |
-| `scenario_11_slow_ramp` | Dynamic | Extremely slow acceleration profile to 500 RPM. |
-| `scenario_12_ambiguous_fault` | Common-mode | Identical +2.0A offset on Phases A and B simultaneously. Controller correctly identifies this as ambiguous, enters LIMP safely without latching an incorrect phase, and maintains control without divergence. |
+Build the shared library first:
 
-### Robustness Sweep
-In addition to the static scenarios above, the repository includes a comprehensive `isolation_sweep.py` script. This executes hundreds of permutations: it sweeps multiple fault types (stuck, offset), sizes (0.5A to 2.0A), operational speeds (1500, 2000 RPM), and electrical injection phases (0 to 360 degrees). All tested scenarios pass with $\ge 90\%$ acceptable ride-through or safe-stop outcomes, proving the algorithm is mathematically sound across the entire electrical cycle.
+```bash
+make lib
+```
+
+## 15.1 Run the Baseline
+
+```bash
+python3 simulation/harness/sil_runner.py --no-plot
+```
+
+## 15.2 Run a Phase A Offset Fault
+
+```bash
+python3 simulation/harness/sil_runner.py \
+  --scenario scenario_2_offset_a_2_0 \
+  --no-plot
+```
+
+## 15.3 Run a Stuck-Sensor Fault
+
+```bash
+python3 simulation/harness/sil_runner.py \
+  --scenario scenario_3_stuck_b_2_0 \
+  --no-plot
+```
+
+## 15.4 Run the Stuck-at-Limit Scenario
+
+```bash
+python3 simulation/harness/sil_runner.py \
+  --scenario scenario_4_stuck_a_limit \
+  --no-plot
+```
+
+## 15.5 Run the Noise-Burst Scenario
+
+```bash
+python3 simulation/harness/sil_runner.py \
+  --scenario scenario_6_noise_burst \
+  --no-plot
+```
+
+## 15.6 Run the Ambiguous-Fault Scenario
+
+```bash
+python3 simulation/harness/sil_runner.py \
+  --scenario scenario_12_ambiguous_fault \
+  --no-plot
+```
+
+## 15.7 Plot Simulation Results
+
+If graphical plotting is supported by the current environment:
+
+```bash
+python3 simulation/harness/sil_runner.py \
+  --scenario scenario_6_noise_burst \
+  --plot
+```
+
+Use the active virtual environment's Python interpreter if dependencies were installed there.
+
+The scenario runner evaluates configured criteria and may return a nonzero exit status when one or more criteria fail.
 
 ---
 
-## 7. Remaining Limitations and Hardware Validation
+# 16. Robustness Testing
 
-*Note: Hardware validation on the physical ESP32 target is currently pending.* The project currently executes strictly in the Software-in-the-Loop (SIL) Python simulation environment.
+The repository includes a parameterised fault-isolation sweep.
 
-Before deploying to physical silicon, the following limitations must be addressed:
-- **Hardware ADC/PWM Synchronization:** In the Python SIL, current measurements are perfectly sampled. Real ESP32 ADCs must be triggered precisely at the center of the $V_0$ zero-vector via hardware timers to ensure clean current reconstruction.
-- **Execution Time Profiling:** Real-world execution duration must be validated directly on the ESP32 using hardware cycle counters. While the C code avoids computationally expensive double-precision math, the exact microsecond latency is target-dependent.
-- **Noise Floors:** The Low-Pass Filter limits and recovery thresholds (e.g., `0.15f * E_acc`) are explicitly tuned for the SIL plant model's ideal characteristics. These will almost certainly require retuning against the physical board's electrical noise profile and sensor EMI.
+Its purpose is to evaluate the isolation logic under different fault configurations and operating conditions.
+
+The sweep script is:
+
+```text
+scripts/isolation_sweep.py
+```
+
+## 16.1 Inspect Supported Options
+
+Before running the sweep:
+
+```bash
+python3 scripts/isolation_sweep.py --help
+```
+
+The available arguments depend on the current version of the script.
+
+## 16.2 Run the Standard Scenario Batch
+
+```bash
+bash scripts/run_all_scenarios.sh
+```
+
+The batch script is intended to execute the configured scenarios and robustness testing.
+
+Review the script before a long run and inspect its output afterward.
+
+For reproducible results, record the current source revision, configuration, command, and complete console output.
+
+**Do not report a robustness target as achieved unless the current run completes and its results support that conclusion.**
+
+---
+
+# 17. ESP32 Build Configuration
+
+The repository includes a PlatformIO configuration:
+
+```text
+platformio.ini
+```
+
+The configured environment is named `esp32dev`.
+
+## 17.1 Install PlatformIO
+
+If PlatformIO CLI is not already installed, install it using the official PlatformIO instructions.
+
+Verify installation:
+
+```bash
+pio --version
+```
+
+## 17.2 Build the Configured Target
+
+From the repository root:
+
+```bash
+pio run -e esp32dev
+```
+
+A successful build verifies that the code compiles for the configured PlatformIO environment.
+
+It does not, by itself, establish that:
+
+- The control loop meets its real-time deadline.
+- ADC sampling is synchronised with PWM.
+- The inverter output is electrically correct.
+- The controller operates stably on a physical motor.
+- Fault recovery is safe on hardware.
+
+These require additional target-specific testing.
+
+---
+
+# 18. Evaluation Metrics
+
+The simulation framework evaluates controller behaviour using configured metrics.
+
+The metrics are calculated from simulation results and compared with the criteria specified in the YAML file.
+
+## 18.1 Electrical Angle Error
+
+Angle error measures the difference between the estimated and true simulated electrical angle.
+
+Because angle is periodic, the error must be wrapped around the ±pi boundary.
+
+Two useful metrics are:
+
+- Angle-error RMS.
+- Maximum absolute angle error.
+
+A low RMS error does not guarantee that the maximum error is acceptable.
+
+## 18.2 Speed Error
+
+Speed error measures the difference between the simulated mechanical speed and the configured speed reference.
+
+The evaluation must use consistent units and an appropriate time window.
+
+Changing-reference scenarios require special care because the reference is not constant throughout the simulation.
+
+## 18.3 Speed Ripple
+
+Peak-to-peak speed ripple is calculated as:
+
+```text
+speed_ripple = maximum_speed - minimum_speed
+```
+
+This metric is useful for steady operating conditions.
+
+For speed-reversal scenarios, the full simulation range may be large by design, so the acceptance criterion must reflect the intended transient behaviour.
+
+## 18.4 Fault-Detection Latency
+
+Detection latency estimates how quickly the controller responds after a fault is introduced.
+
+A rigorous implementation should measure the actual fault-detection event rather than relying only on a later operating-mode transition.
+
+The current metric implementation should be checked to establish exactly which event it measures.
+
+## 18.5 Fault-Isolation Accuracy
+
+Fault isolation checks whether the selected fault channel matches the configured expected channel.
+
+A fault should not be considered correctly isolated merely because the controller enters a degraded mode.
+
+The selected channel and expected channel must be compared explicitly.
+
+## 18.6 Current-Reconstruction Error
+
+The SIL runner records both the controller-visible currents and the simulated plant's true currents.
+
+This permits reconstructed current estimates to be compared with simulated ground truth.
+
+The resulting error measures the quality of reconstruction under the injected fault.
+
+## 18.7 Recovery Time
+
+Recovery time is intended to measure how long the controller takes to return to an acceptable operating state after a temporary disturbance.
+
+Recovery evaluation should verify:
+
+- The disturbance was actually applied.
+- The expected degraded state occurred, if applicable.
+- The controller returned to the expected state.
+- The return was sustained for a suitable time interval.
+- The evaluation used the correct disturbance duration.
+
+A single transient return to closed-loop mode should not automatically be considered successful recovery.
+
+---
+
+# 19. Motor and Controller Parameters
+
+The repository defines motor and controller parameters in the source and simulation configuration.
+
+Check `src/motor_params.h` and the simulation configuration before using specific numerical values.
+
+Important parameters include:
+
+| Parameter | Symbol | Role |
+|---|---|---|
+| Stator resistance | Rs | Determines resistive voltage drop |
+| Stator inductance | Ls | Determines current dynamics |
+| Permanent-magnet flux linkage | psi_f | Influences back-EMF and torque relationships |
+| Pole pairs | P | Relates electrical and mechanical speed |
+| Rotor inertia | J | Determines mechanical acceleration |
+| Viscous damping | B | Represents mechanical damping |
+| Nominal current | In | Sets current-related operating limits |
+| DC-bus voltage | Vbus | Limits available inverter voltage |
+
+These parameters must reflect the intended motor and simulation model.
+
+Incorrect parameters can significantly affect the performance of sensorless observers.
+
+The electrical and mechanical units must remain consistent throughout the implementation.
+
+---
+
+# 20. Current Validation Status
+
+The project uses both native tests and SIL scenarios.
+
+These tests provide different types of evidence:
+
+- Native tests check selected mathematical and software functions.
+- SIL tests evaluate the controller against the simulated motor.
+- PlatformIO compilation checks compatibility with the configured embedded toolchain.
+- Physical hardware testing is required to establish real-world behaviour.
+
+A successful result in one category does not automatically establish success in another.
+
+## 20.1 Validation Checklist
+
+| Validation Item | Status |
+|---|---|
+| C controller implementation | Present in the repository |
+| Native transform tests | Available |
+| Python simulation environment | Available |
+| Fault-injection framework | Available |
+| Scenario-based evaluation | Available |
+| Automated scenario runner | Available |
+| Fault-isolation robustness sweep | Available; current complete results must be verified |
+| All configured scenarios passing | Not claimed without a fresh complete run |
+| PlatformIO ESP32 build | Must be verified on the intended checkout |
+| Physical motor operation | Not established by SIL results |
+| ESP32 execution-time profiling | Requires target hardware |
+| Hardware fault-injection validation | Requires controlled hardware testing |
+
+## 20.2 Known Validation Concerns
+
+Development testing has identified cases that require careful verification:
+
+- Scenario 4 has had a mismatch between the configured maximum-angle threshold and a test expectation.
+- Scenario 12 has had a reported failure involving ambiguous-fault handling and state estimation.
+- Historical scenario and robustness-sweep reports should not be treated as authoritative unless they match the current source and configuration.
+
+The appropriate next step is to run the current test suite, resolve the mismatches, and preserve fresh logs.
+
+---
+
+# 21. Known Limitations
+
+## 21.1 No Established Physical Hardware Validation
+
+The SIL environment does not reproduce every aspect of a physical inverter, motor, sensor, or microcontroller.
+
+Hardware testing is necessary to validate the complete system.
+
+## 21.2 ADC and PWM Synchronisation
+
+Current sampling must be coordinated with inverter switching.
+
+Sampling at unsuitable points can introduce current-measurement errors and switching noise.
+
+The correct sampling strategy depends on the inverter, current-sensing topology, and PWM implementation.
+
+## 21.3 Real-Time Execution
+
+The native shared-library build is useful for software testing but does not establish the execution time of the embedded target.
+
+The actual ESP32 control-loop timing must be measured using the target toolchain and hardware.
+
+## 21.4 Sensor Noise and Calibration
+
+Physical current sensors have finite bandwidth, offset, gain error, quantisation, and noise.
+
+The KCL residual and stuck-sensor thresholds must be evaluated against these effects.
+
+## 21.5 Motor-Parameter Sensitivity
+
+The observers and independent current predictor depend on motor parameters.
+
+Resistance, inductance, and flux-linkage errors can affect current prediction and rotor-state estimation.
+
+## 21.6 Low-Speed Estimation
+
+Back-EMF-based sensorless estimation becomes less informative at low speeds.
+
+The operating range and startup handoff must be validated for the actual motor.
+
+## 21.7 Multiple Simultaneous Faults
+
+The single-phase reconstruction equations assume the remaining phase measurements are reliable.
+
+Simultaneous faults can violate this assumption.
+
+The controller must not claim successful single-phase reconstruction when the available measurements do not support it.
+
+## 21.8 Safety and Deployment
+
+This repository is an engineering prototype.
+
+It has not been established as a certified safety controller and should not be used as the sole protection mechanism for a safety-critical motor system.
+
+Independent hardware protection, fault shutdown, overcurrent protection, and controlled laboratory validation are necessary before real-world deployment.
+
+---
+
+# 22. Future Work
+
+The following improvements would strengthen the project.
+
+## Software and Algorithms
+
+- Resolve the remaining scenario and test-configuration mismatches.
+- Validate ambiguous-fault handling.
+- Improve fault-detection latency measurement.
+- Require sustained recovery before declaring a temporary fault cleared.
+- Verify current reconstruction across a wider range of operating conditions.
+- Validate parameter-mismatch and transient-disturbance handling.
+- Improve automated reporting and preserve scenario logs.
+
+## Simulation
+
+- Verify that every YAML disturbance is actually applied by the runner.
+- Add tests for invalid or unsupported configuration fields.
+- Expand parameter sweeps and record the exact configuration used.
+- Compare observer performance across speed, load, and parameter variations.
+- Evaluate sensor noise, sampling error, and voltage reconstruction error.
+
+## Embedded Development
+
+- Build and inspect the ESP32 target.
+- Measure execution time on the physical target.
+- Implement or validate timer-triggered ADC sampling.
+- Validate PWM timing and duty-cycle limits.
+- Integrate actual current and voltage measurements.
+- Validate startup, handoff, fault handling, and recovery on a supervised test bench.
+
+## Experimental Validation
+
+- Compare estimated electrical angle with an independent encoder measurement.
+- Compare reconstructed currents with independently measured phase currents.
+- Test controlled sensor offsets and stuck-sensor conditions.
+- Record current, speed, observer state, and operating-mode transitions.
+- Document test conditions and repeatability.
+
+---
+
+# 23. Technologies Used
+
+| Technology | Application |
+|---|---|
+| C | Embedded-oriented FOC, observer, and fault-monitor implementation |
+| Python | Simulation orchestration, fault injection, and result analysis |
+| NumPy | Numerical calculations |
+| SciPy | Scientific computing |
+| Matplotlib | Simulation visualisation |
+| PyYAML | Scenario configuration |
+| pytest | Python test execution |
+| GCC / Clang | Native C compilation |
+| GNU Make | Native build and test automation |
+| PlatformIO | Embedded target configuration and build |
+| ESP32 | Intended embedded controller target |
+
+---
+
+# 24. References
+
+The following topics are useful for understanding and extending this project:
+
+1. Field-Oriented Control of permanent-magnet synchronous motors.
+2. Clarke and Park transformations.
+3. Sliding Mode Observers for sensorless motor drives.
+4. Back-EMF-based rotor-position estimation.
+5. Voltage-model and current-model flux observers.
+6. Space Vector Modulation for three-phase inverters.
+7. Kirchhoff's Current Law and three-phase current reconstruction.
+8. Model-based fault detection and isolation.
+9. Software-in-the-Loop and Hardware-in-the-Loop testing.
+10. Embedded ADC synchronisation and real-time motor control.
+
+For technical work, consult relevant motor-control textbooks, peer-reviewed observer literature, and official ESP32 and PlatformIO documentation.
+
+---
+
+## Author's Note
+
+This repository is intended to demonstrate the design and investigation of sensorless motor control and fault-tolerant estimation.
+
+The emphasis is on understanding the controller architecture, implementing model-assisted fault-handling logic, and validating behaviour through repeatable simulation.
+
+The results should be interpreted according to the tests actually executed and the limitations of the models used.
+
+**Simulation success is not equivalent to hardware validation.**
