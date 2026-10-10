@@ -1,8 +1,0 @@
-
-Evaluation for scenario_12_ambiguous_fault:
-  mean_speed           : FAIL (value=1388.55)
-  angle_error_rms      : FAIL (value=100.27)
-  max_angle_error      : FAIL (value=179.99)
-  speed_ripple_ptp     : FAIL (value=1617.26)
-  expected_mode        : FAIL (value=3.00)
-FAIL (scenario_12_ambiguous_fault): Did not meet all criteria.

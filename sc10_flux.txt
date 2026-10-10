@@ -1,8 +1,0 @@
-
-Evaluation for scenario_10_low_speed:
-  angle_error_rms      : FAIL (value=27.55)
-  max_angle_error      : FAIL (value=145.56)
-  mean_speed           : PASS (value=22.90)
-  speed_ripple_ptp     : PASS (value=973.82)
-  expected_mode        : PASS (value=2.00)
-FAIL (scenario_10_low_speed): Did not meet all criteria.

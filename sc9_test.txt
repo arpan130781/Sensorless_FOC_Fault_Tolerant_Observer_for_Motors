@@ -1,8 +1,0 @@
-
-Evaluation for scenario_9_load_step:
-  angle_error_rms      : PASS (value=0.75)
-  max_angle_error      : PASS (value=1.66)
-  mean_speed           : PASS (value=6.93)
-  speed_ripple_ptp     : PASS (value=14.02)
-  expected_mode        : PASS (value=2.00)
-PASS (scenario_9_load_step): Met all criteria.

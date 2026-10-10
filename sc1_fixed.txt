@@ -1,8 +1,0 @@
-
-Evaluation for scenario_1_rs_drift:
-  angle_error_rms      : PASS (value=2.07)
-  max_angle_error      : PASS (value=5.00)
-  mean_speed           : FAIL (value=35.33)
-  speed_ripple_ptp     : PASS (value=3.54)
-  expected_mode        : PASS (value=2.00)
-FAIL (scenario_1_rs_drift): Did not meet all criteria.

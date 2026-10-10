@@ -1,9 +1,0 @@
-
-Evaluation for scenario_6_noise_burst:
-  mean_speed           : PASS (value=1.63)
-  angle_error_rms      : PASS (value=4.42)
-  max_angle_error      : PASS (value=13.76)
-  speed_ripple_ptp     : PASS (value=298.13)
-  recovery_time        : FAIL (value=-1.00)
-  expected_mode        : PASS (value=2.00)
-FAIL (scenario_6_noise_burst): Did not meet all criteria.
