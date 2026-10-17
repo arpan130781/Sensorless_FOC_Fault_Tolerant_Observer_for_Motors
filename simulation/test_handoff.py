@@ -146,3 +146,51 @@ def test_stall_fallback_unit():
 
     assert seq == [2, 1], f"Expected stall fallback sequence [2, 1], got {seq}"
     assert h.stall_timer == 0.0, "Stall timer must be reset on fallback to OPEN_LOOP"
+
+
+@pytest.mark.parametrize("fault_amp", [0.5, 1.0, 2.0])
+@pytest.mark.parametrize("stage,inject_time", [("align", 0.05), ("open_loop", 0.6)])
+def test_fault_during_startup_stages(fault_amp, stage, inject_time):
+    """
+    Round 2 Audit Task 1 Regression Test:
+    Inject sensor fault of 0.5A, 1.0A, 2.0A during ALIGN (0.05s) and OPEN_LOOP (0.6s).
+    Assert:
+    1. Observers report 0.0 rad/s during ALIGN (standstill).
+    2. Full mode sequence is strictly ALIGN (0) -> OPEN_LOOP (1) -> CLOSED_LOOP (2) -> DEGRADED (3).
+    3. Controller NEVER prematurely jumps to SAFE_STOP (5).
+    """
+    controller = FocController(PATHS['lib_path'])
+    controller.init(MOTOR_PARAMS, CONTROLLER_PARAMS)
+    controller.set_speed_ref(2000.0 * (2 * math.pi / 60) * MOTOR_PARAMS['P'])
+    plant = PMSMModel(**MOTOR_PARAMS)
+
+    dt_c = 1.0 / CONTROLLER_PARAMS['pwm_freq']
+    dt_p = 1e-5
+    sub_steps = int(dt_c / dt_p)
+
+    modes = []
+    align_omegas = []
+    for k in range(int(1.5 / dt_c)):
+        t = k * dt_c
+        ia, ib, ic = plant.get_phase_currents()
+        if t >= inject_time:
+            ia += fault_amp
+        out = controller.tick(ia, ib, ic, MOTOR_PARAMS['Vbus'])
+        modes.append(out.control_mode)
+        if t < 0.5:
+            align_omegas.append(abs(out.omega_hat))
+        va, vb, vc = duties_to_voltages(out.duty_a, out.duty_b, out.duty_c, MOTOR_PARAMS['Vbus'], ia, ib, ic)
+        for _ in range(sub_steps):
+            vd, vq = phase_to_dq(va, vb, vc, plant.theta_e)
+            plant.step(vd, vq, 0.0, dt_p)
+
+    seq = []
+    for m in modes:
+        if not seq or m != seq[-1]:
+            seq.append(m)
+
+    assert max(align_omegas) == 0.0, f"Observer must report 0.0 rad/s during ALIGN, got max {max(align_omegas)}"
+    assert seq == [0, 1, 2, 3], (
+        f"Fault of {fault_amp}A in {stage} failed mode sequence: expected [0, 1, 2, 3], got {seq}"
+    )
+

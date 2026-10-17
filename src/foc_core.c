@@ -95,9 +95,8 @@ FocOutput foc_tick(const FocInput* input) {
     // Fault handling
     
     float obs_theta = obs_mgr_get_theta(&obs_mgr);
-    FaultStatus fs = fault_update(&fault, input->i_a, input->i_b, input->i_c, prev_v_alpha, prev_v_beta, obs_theta, speed_est, dt_curr);
+    FaultStatus fs = fault_update(&fault, input->i_a, input->i_b, input->i_c, prev_v_alpha, prev_v_beta, obs_theta, speed_est, last_mode, dt_curr);
 
-    
     float ia = fs.i_a_rec;
     float ib = fs.i_b_rec;
     float ic = fs.i_c_rec;
@@ -106,13 +105,19 @@ FocOutput foc_tick(const FocInput* input) {
     float i_alpha, i_beta;
     clarke_transform(ia, ib, ic, &i_alpha, &i_beta);
     
-    // Previous v_alpha/beta applied
-    
-    // Observers
-    obs_mgr_update(&obs_mgr, prev_v_alpha, prev_v_beta, i_alpha, i_beta, speed_est, dt_curr);
-
-    float obs_omega = obs_mgr_get_omega(&obs_mgr);
-    speed_est = obs_omega;
+    // Observers: reset and zero output during ALIGN while forced alignment is active
+    float obs_omega;
+    if (last_mode == ALIGN) {
+        obs_mgr_reset(&obs_mgr);
+        obs_theta = 0.0f;
+        obs_omega = 0.0f;
+        speed_est = 0.0f;
+    } else {
+        obs_mgr_update(&obs_mgr, prev_v_alpha, prev_v_beta, i_alpha, i_beta, speed_est, dt_curr);
+        obs_theta = obs_mgr_get_theta(&obs_mgr);
+        obs_omega = obs_mgr_get_omega(&obs_mgr);
+        speed_est = obs_omega;
+    }
 
     // Startup
     float forced_theta, id_start, iq_start;

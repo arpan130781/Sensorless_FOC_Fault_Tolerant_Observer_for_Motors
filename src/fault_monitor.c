@@ -40,15 +40,17 @@ void fault_reset(FaultMonitor* fm) {
 
 FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                          float v_alpha, float v_beta,
-                         float theta, float omega, float dt)
+                         float theta, float omega,
+                         int controller_mode, float dt)
 {
     /* ---- Step / onset changes from previous healthy sample ---- */
     float dia = fabsf(i_a - fm->prev_i_a);
     float dib = fabsf(i_b - fm->prev_i_b);
     float dic = fabsf(i_c - fm->prev_i_c);
 
-    /* ---- Stuck-sensor detection (only when motor is spinning) ---- */
-    if (fabsf(omega) > 50.0f) {
+    /* ---- Stuck-sensor detection (only in closed-loop / degraded / limp modes) ---- */
+    bool is_closed_mode = (controller_mode == CLOSED_LOOP || controller_mode == DEGRADED || controller_mode == LIMP);
+    if (is_closed_mode) {
         if (dia < 0.0001f) fm->stuck_count_a++; else fm->stuck_count_a = 0;
         if (dib < 0.0001f) fm->stuck_count_b++; else fm->stuck_count_b = 0;
         if (dic < 0.0001f) fm->stuck_count_c++; else fm->stuck_count_c = 0;
@@ -358,7 +360,7 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                   (fm->fault_latch_c ? 1 : 0);
 
     /* Monitor remaining healthy channels for a second sensor fault when 1 channel is already degraded */
-    if (num_latched == 1 && !fm->safe_stop_latched && fm->post_latch_settling_timer <= 0.0f && fabsf(omega) > 50.0f) {
+    if (num_latched == 1 && !fm->safe_stop_latched && fm->post_latch_settling_timer <= 0.0f && is_closed_mode) {
         float ia_v = fm->fault_latch_a ? -(i_b + i_c) : i_a;
         float ib_v = fm->fault_latch_b ? -(i_a + i_c) : i_b;
         float ic_v = fm->fault_latch_c ? -(i_a + i_b) : i_c;
