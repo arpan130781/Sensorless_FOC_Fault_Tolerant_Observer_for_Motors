@@ -40,13 +40,23 @@ extern "C" {
 #define PWM_RESOLUTION      11          // 11-bit resolution (0-2047)
 #define PWM_MAX             ((1 << PWM_RESOLUTION) - 1)
 
-// ADC Settings
-#define ADC_MAX             4095.0f
+// ADC Settings & Current Sensing Parameters
+#define ADC_MAX_COUNT       4095.0f
 #define ADC_VOLTAGE_REF     3.3f
-#define SHUNT_RESISTOR      0.01f       // 10 mOhm
-#define OPAMP_GAIN          50.0f
-#define CURRENT_SCALE       (ADC_VOLTAGE_REF / (ADC_MAX * SHUNT_RESISTOR * OPAMP_GAIN))
-#define ADC_OFFSET          2048.0f     // Center point (1.65V)
+#define SHUNT_RESISTOR_OHM  0.010f      // 10 mOhm current shunt
+#define OPAMP_GAIN          20.0f       // Current sense amplifier gain (gives +/-8.25A full-scale range)
+#define CURRENT_FULL_SCALE  ((ADC_VOLTAGE_REF / 2.0f) / (SHUNT_RESISTOR_OHM * OPAMP_GAIN))
+#define CURRENT_SCALE       (ADC_VOLTAGE_REF / (ADC_MAX_COUNT * SHUNT_RESISTOR_OHM * OPAMP_GAIN))
+#define MOTOR_NOMINAL_IN    5.0f
+
+// Compile-time assertion that full-scale sensing range exceeds 1.2x rated motor current
+static_assert(CURRENT_FULL_SCALE > 1.2f * MOTOR_NOMINAL_IN,
+              "Current sensing full-scale range must exceed 1.2 * In");
+
+// Calibrated ADC zero-current offsets (calibrated at startup with PWM off)
+static float adc_offset_a = 2048.0f;
+static float adc_offset_b = 2048.0f;
+static float adc_offset_c = 2048.0f;
 
 // ============================================================================
 // GLOBALS & STATE
@@ -112,9 +122,9 @@ void IRAM_ATTR foc_isr() {
         float b_raw = analogRead(PIN_SENSE_B);
         float c_raw = analogRead(PIN_SENSE_C);
 
-        ia = (a_raw - ADC_OFFSET) * CURRENT_SCALE;
-        ib = (b_raw - ADC_OFFSET) * CURRENT_SCALE;
-        ic = (c_raw - ADC_OFFSET) * CURRENT_SCALE;
+        ia = (a_raw - adc_offset_a) * CURRENT_SCALE;
+        ib = (b_raw - adc_offset_b) * CURRENT_SCALE;
+        ic = (c_raw - adc_offset_c) * CURRENT_SCALE;
     }
 
     FocInput foc_in = {
@@ -238,6 +248,20 @@ void setup() {
     ledcAttachPin(PIN_PWM_C, 2);
 
     analogReadResolution(12);
+
+    // Startup offset calibration: average 500 samples with PWM off
+    float sum_a = 0.0f, sum_b = 0.0f, sum_c = 0.0f;
+    const int CAL_SAMPLES = 500;
+    for (int i = 0; i < CAL_SAMPLES; i++) {
+        sum_a += (float)analogRead(PIN_SENSE_A);
+        sum_b += (float)analogRead(PIN_SENSE_B);
+        sum_c += (float)analogRead(PIN_SENSE_C);
+        delayMicroseconds(50);
+    }
+    adc_offset_a = sum_a / (float)CAL_SAMPLES;
+    adc_offset_b = sum_b / (float)CAL_SAMPLES;
+    adc_offset_c = sum_c / (float)CAL_SAMPLES;
+    Serial.printf("[HAL] Calibrated ADC offsets: A=%.1f, B=%.1f, C=%.1f\n", adc_offset_a, adc_offset_b, adc_offset_c);
 
     // 20kHz Hardware Interrupt Timer
     foc_timer = timerBegin(0, 80, true); 

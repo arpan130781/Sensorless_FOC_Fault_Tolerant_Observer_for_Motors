@@ -52,9 +52,10 @@ class SimulationResult:
     confidence_flux: np.ndarray
 
 class SILRunner:
-    def __init__(self, config_sim, fault_scenario=None):
+    def __init__(self, config_sim, fault_scenario=None, sensor_model=None):
         self.config = config_sim
         self.scenario_name = fault_scenario
+        self.sensor_model = sensor_model
         
         lib_path = PATHS['lib_path']
         if not os.path.exists(lib_path):
@@ -113,6 +114,9 @@ class SILRunner:
             self.plant.Rs_scale = self.injector.get_rs_scale(t)   # plant derives Rs from Rs_nom, temperature and Rs_scale
             self.plant.Ls = MOTOR_PARAMS['Ls'] * self.injector.get_ls_scale(t)
             
+            if self.sensor_model is not None:
+                ia, ib, ic = self.sensor_model.measure_phases(ia, ib, ic)
+
             ia_corr, ib_corr, ic_corr = self.injector.corrupt_currents(ia, ib, ic, t)
             vbus = self.injector.corrupt_vbus(MOTOR_PARAMS['Vbus'], t)
             
