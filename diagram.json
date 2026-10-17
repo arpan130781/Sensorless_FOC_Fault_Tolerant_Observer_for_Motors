@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "author": "Antigravity",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-logic-analyzer",
+      "id": "logic",
+      "top": -150,
+      "left": 30,
+      "attrs": {
+        "signals": "PWM_U,PWM_V,PWM_W"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_green",
+      "top": 150,
+      "left": -120,
+      "attrs": {
+        "color": "green",
+        "label": "NORMAL (MODE 2)"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_yellow",
+      "top": 150,
+      "left": -60,
+      "attrs": {
+        "color": "yellow",
+        "label": "DEGRADED (MODE 3)"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_red",
+      "top": 150,
+      "left": 0,
+      "attrs": {
+        "color": "red",
+        "label": "LIMP/FAULT (MODE 4)"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 220,
+      "left": -120,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r2",
+      "top": 220,
+      "left": -60,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r3",
+      "top": 220,
+      "left": 0,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn_fault",
+      "top": 150,
+      "left": 200,
+      "attrs": {
+        "color": "red",
+        "label": "INJECT FAULT (PHASE A)"
+      }
+    },
+    {
+      "type": "wokwi-slide-switch",
+      "id": "sw_mode",
+      "top": 50,
+      "left": 200,
+      "attrs": {
+        "label": "VIRTUAL MOTOR (GND=ON)"
+      }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
+    [ "esp:25", "logic:1", "green", [ "h0" ] ],
+    [ "esp:26", "logic:2", "blue", [ "h0" ] ],
+    [ "esp:27", "logic:3", "orange", [ "h0" ] ],
+
+    [ "esp:18", "led_green:A", "green", [ "h0" ] ],
+    [ "led_green:C", "r1:1", "black", [ "h0" ] ],
+    [ "r1:2", "esp:GND.1", "black", [ "h0" ] ],
+
+    [ "esp:19", "led_yellow:A", "gold", [ "h0" ] ],
+    [ "led_yellow:C", "r2:1", "black", [ "h0" ] ],
+    [ "r2:2", "esp:GND.1", "black", [ "h0" ] ],
+
+    [ "esp:21", "led_red:A", "red", [ "h0" ] ],
+    [ "led_red:C", "r3:1", "black", [ "h0" ] ],
+    [ "r3:2", "esp:GND.1", "black", [ "h0" ] ],
+
+    [ "esp:15", "btn_fault:1.1", "orange", [ "h0" ] ],
+    [ "btn_fault:2.1", "esp:GND.2", "black", [ "h0" ] ],
+
+    [ "esp:4", "sw_mode:2", "purple", [ "h0" ] ],
+    [ "sw_mode:1", "esp:GND.2", "black", [ "h0" ] ]
+  ]
+}

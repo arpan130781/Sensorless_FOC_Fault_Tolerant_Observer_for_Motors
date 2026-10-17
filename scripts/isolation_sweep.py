@@ -34,7 +34,8 @@ def build_debug_lib():
     with open(os.path.join(d, 'foc_core.c'), 'a') as fh:
         fh.write("\nvoid foc_dbg(int* o){o[0]=fault.fault_latch_a;"
                  "o[1]=fault.fault_latch_b;o[2]=fault.fault_latch_c;}\n")
-    out = os.path.join(d, 'libdbg.so')
+    ext = 'dylib' if sys.platform == 'darwin' else 'so'
+    out = os.path.join(d, f'libdbg.{ext}')
     subprocess.check_call(['gcc', '-O2', '-fPIC', '-shared', *glob.glob(d + '/*.c'), '-lm', '-o', out])
     return out
 
@@ -99,11 +100,16 @@ if __name__ == '__main__':
                     if 'sensor_offset' in types:
                         for off in offsets:
                             jobs.append((lib, 'sensor_offset', off, ref, ch, t0 + ph))
+    print(f"Running isolation sweep across {len(jobs)} configurations on {a.jobs} workers...", flush=True)
+    R = []
     with Pool(a.jobs) as pool:
-        R = pool.map(one, jobs)
+        for idx, res in enumerate(pool.imap_unordered(one, jobs), 1):
+            R.append(res)
+            if idx % 12 == 0 or idx == len(jobs):
+                print(f"  Progress: {idx}/{len(jobs)} runs completed ({100.0*idx/len(jobs):.1f}%)...", flush=True)
 
     failed = False
-    print(f"{len(R)} runs\n")
+    print(f"\n{len(R)} runs finished\n")
     print(f"{'fault':22s} {'ref':>5s}  {'isolated':>10s}  {'acceptable':>11s}  worst case (ride-through)")
     groups = sorted({(r['typ'], r['offset'], r['ref']) for r in R})
     for typ, off, ref in groups:

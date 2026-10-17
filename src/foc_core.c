@@ -23,6 +23,9 @@ static int tick_counter = 0;
 static float dt_curr = 0.0f;
 static float dt_spd = 0.0f;
 static float safe_stop_timer = 0.0f;
+static float prev_v_alpha = 0.0f;
+static float prev_v_beta = 0.0f;
+static float speed_est = 0.0f;
 
 void foc_init(const MotorParams* m, const ControllerParams* c) {
     motor = *m;
@@ -46,6 +49,9 @@ void foc_reset(void) {
     current_iq_ref = 0.0f;
     tick_counter = 0;
     safe_stop_timer = 0.0f;
+    prev_v_alpha = 0.0f;
+    prev_v_beta = 0.0f;
+    speed_est = 0.0f;
 }
 
 void foc_set_speed_ref(float omega_ref_rads) { current_omega_ref = omega_ref_rads; }
@@ -54,8 +60,6 @@ void foc_set_torque_ref(float iq_ref_A) { current_iq_ref = iq_ref_A; }
 FocOutput foc_tick(const FocInput* input) {
 
     FocOutput out = {0};
-    static float prev_v_alpha = 0.0f, prev_v_beta = 0.0f;
-    static float speed_est = 0.0f;
     
     // Fault handling
     
@@ -84,6 +88,16 @@ FocOutput foc_tick(const FocInput* input) {
     if (tick_counter == 0) {
         if (handoff.current_mode == CLOSED_LOOP || handoff.current_mode == DEGRADED || handoff.current_mode == LIMP) {
             float err = current_omega_ref - obs_omega;
+
+            // Speed-adaptive gain scaling: at low speeds, scale down spd_kp and spd_ki to maintain damping margin
+            float ref_spd_rpm = fabsf(current_omega_ref) * (60.0f / (2.0f * (float)M_PI * (float)motor.P));
+            float spd_scale = 1.0f;
+            if (ref_spd_rpm < 1200.0f) {
+                spd_scale = 0.26f + 0.74f * (ref_spd_rpm / 1200.0f);
+            }
+            pi_spd.kp = ctrl.spd_kp * spd_scale;
+            pi_spd.ki = ctrl.spd_ki * (spd_scale * spd_scale);
+
             current_iq_ref = pi_update(&pi_spd, err, dt_spd);
             
             if (handoff.current_mode == DEGRADED) {

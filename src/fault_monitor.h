@@ -23,7 +23,7 @@ typedef struct {
     float clear_timer;
     float fault_isolation_timer;
     float unresolved_fault_timer;
-    float err_acc_A, err_acc_B, err_acc_C;
+    float err_acc_A, err_acc_B, err_acc_C, err_acc_Amb;
     float E_acc;
     FaultStatus status;
 
@@ -33,6 +33,7 @@ typedef struct {
     bool ambiguous_fault;
     int consecutive_confident;
     int best_channel;
+    int onset_channel;
 } FaultMonitor;
 
 void fault_init(FaultMonitor* fm, float Rs, float Ls, float psi_f);

@@ -9,7 +9,7 @@ else
 fi
 
 BUILD_DIR="build"
-SRC_DIR="controller"
+SRC_DIR="src"
 mkdir -p "$BUILD_DIR"
 
 echo "Compiling controller library..."

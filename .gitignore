@@ -42,6 +42,6 @@ build/
 # IDE
 .vscode/
 
-# Temporary files
-*.tmp
-*.log
+# MATLAB / Simulink
+*.slxc
+slprj/

@@ -56,7 +56,7 @@ int handoff_update(Handoff* h, float obs_health, float obs_disagree, float obs_o
         
         if (fabsf(obs_omega) < 10.0f) {
             h->stall_timer += dt;
-            if (h->stall_timer > 0.05f) {
+            if (h->stall_timer > 0.30f) { // 300 ms true stall timeout
                 h->current_mode = OPEN_LOOP; // Fallback to I/F
                 h->time_in_state = 0;
                 h->stall_timer = 0.0f;

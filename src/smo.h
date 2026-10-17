@@ -7,6 +7,8 @@ typedef struct {
     float theta_hat, omega_hat;
     float k, h, lpf_gain, Rs, Ls;
     float prev_theta;
+    float prev_theta_raw;
+    float dir;
 } SMO;
 
 void smo_init(SMO* smo, float Rs, float Ls, float k, float h, float lpf_gain);

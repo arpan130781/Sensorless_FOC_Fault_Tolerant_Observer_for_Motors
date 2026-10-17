@@ -1,4 +1,5 @@
 import os
+import sys
 
 MOTOR_PARAMS = {
     'Rs': 0.5,
@@ -35,7 +36,17 @@ SIM_PARAMS = {
     'speed_ref_rpm': 2000.0
 }
 
+_build_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'build'))
+_lib_ext = 'dylib' if sys.platform == 'darwin' else 'so'
+_lib_path = os.path.join(_build_dir, f'libfoc_controller.{_lib_ext}')
+if not os.path.exists(_lib_path):
+    _alt_ext = 'so' if _lib_ext == 'dylib' else 'dylib'
+    _alt_path = os.path.join(_build_dir, f'libfoc_controller.{_alt_ext}')
+    if os.path.exists(_alt_path):
+        _lib_path = _alt_path
+
 PATHS = {
-    'lib_path': os.path.join(os.path.dirname(__file__), '..', '..', 'build', 'libfoc_controller.so'),
+    'lib_path': _lib_path,
     'faults_yaml': os.path.join(os.path.dirname(__file__), '..', 'fault_injection', 'fault_scenarios.yaml')
 }
+
