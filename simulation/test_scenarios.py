@@ -1,6 +1,7 @@
 import numpy as np
 from simulation.harness.sil_runner import SILRunner, SIM_PARAMS
 from simulation.analysis.metrics import evaluate_scenario, compute_max_angle_error
+from simulation.fault_injection.fault_injector import NullFaultInjector
 import yaml
 import pytest
 
@@ -229,4 +230,54 @@ def test_all_scenarios_execute_and_pass(scenario_name):
 
     for crit, data in evaluation.items():
         assert bool(data['pass']), f"Scenario '{scenario_name}' failed criterion '{crit}': {data}"
+
+
+class SingleSampleSpikeInjector(NullFaultInjector):
+    def __init__(self, target_time, phase, offset):
+        super().__init__()
+        self.target_time = target_time
+        self.phase = phase
+        self.offset = offset
+        self.injected = False
+
+    def corrupt_currents(self, ia, ib, ic, t):
+        if not self.injected and t >= self.target_time:
+            self.injected = True
+            if self.phase == 'a':
+                return ia + self.offset, ib, ic
+            elif self.phase == 'b':
+                return ia, ib + self.offset, ic
+            elif self.phase == 'c':
+                return ia, ib, ic + self.offset
+        return ia, ib, ic
+
+
+@pytest.mark.parametrize("phase", ['a', 'b', 'c'])
+@pytest.mark.parametrize("offset", [0.5, 1.0, 2.0])
+def test_single_sample_spike_rejection(phase, offset):
+    """
+    Task 1 regression test:
+    Inject a single corrupted sample (+0.5A, +1.0A, +2.0A on phases A, B, C) at t=2.0s.
+    Assert control_mode never leaves 2 (CLOSED_LOOP) and speed never dips more than 3%
+    below baseline minimum speed (relative to nominal speed 2000 RPM).
+    """
+    if not hasattr(test_single_sample_spike_rejection, 'base_res'):
+        runner_base = SILRunner(config_sim=SIM_PARAMS, fault_scenario='no_fault_baseline')
+        test_single_sample_spike_rejection.base_res = runner_base.run()
+    base_res = test_single_sample_spike_rejection.base_res
+    base_min = np.min(base_res.speed_rpm[base_res.time >= 2.0])
+
+    runner = SILRunner(config_sim=SIM_PARAMS, fault_scenario='no_fault_baseline')
+    runner.injector = SingleSampleSpikeInjector(2.0, phase, offset)
+    res = runner.run()
+
+    closed_loop_mask = res.time >= 1.5
+    modes = set(res.control_mode[closed_loop_mask])
+    assert modes == {2.0}, f"Control mode left CLOSED_LOOP (mode 2) on spike {phase} {offset}A: modes={modes}"
+
+    res_min = np.min(res.speed_rpm[res.time >= 2.0])
+    extra_dip = max(0.0, base_min - res_min)
+    pct_dip = (extra_dip / SIM_PARAMS['speed_ref_rpm']) * 100.0
+    assert pct_dip <= 3.0, f"Speed dipped by {pct_dip:.2f}% (> 3.0%) on spike {phase} {offset}A (extra dip {extra_dip:.2f} RPM)"
+
 

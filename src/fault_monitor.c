@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #define KCL_THRESH 0.3f
+#define KCL_CONSECUTIVE_EXCEED_LIMIT 5  /* Require 5 consecutive exceedances (250 us @ 20 kHz) */
 #define ISOLATION_WINDOW 0.001f   /* 1 ms accumulation window */
 #define RECOVERY_WINDOW 0.500f   /* 500 ms sustained healthy before clearing */
 
@@ -20,6 +21,9 @@ void fault_reset(FaultMonitor* fm) {
     fm->status.degradation_state = CLOSED_LOOP;
     fm->fault_latch_a = false; fm->fault_latch_b = false; fm->fault_latch_c = false;
     fm->clear_timer = 0; fm->fault_isolation_timer = 0; fm->unresolved_fault_timer = 0;
+    fm->healthy_residual_timer = 0;
+    fm->kcl_exceed_count = 0;
+    fm->candidate_onset_channel = -1;
     fm->ambiguous_fault = false;
     fm->consecutive_confident = 0; fm->best_channel = -1;
     fm->err_acc_A = 0; fm->err_acc_B = 0; fm->err_acc_C = 0; fm->err_acc_Amb = 0; fm->E_acc = 0;
@@ -44,12 +48,31 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
     if (dib < 0.0001f) fm->stuck_count_b++; else fm->stuck_count_b = 0;
     if (dic < 0.0001f) fm->stuck_count_c++; else fm->stuck_count_c = 0;
 
-    /* ---- KCL residual ---- */
+    /* ---- KCL residual and debounce ---- */
     float E = i_a + i_b + i_c;
-    bool k_fault = fabsf(E) > KCL_THRESH;
+    bool k_sample_exceed = fabsf(E) > KCL_THRESH;
+    if (k_sample_exceed) {
+        fm->kcl_exceed_count++;
+        if (fm->kcl_exceed_count == 1) {
+            /* Record candidate single-sensor jump at initial exceedance tick */
+            if (dia > 1.4f * dib && dia > 1.4f * dic && dia > 0.25f && dib < 0.35f && dic < 0.35f) {
+                fm->candidate_onset_channel = 0;
+            } else if (dib > 1.4f * dia && dib > 1.4f * dic && dib > 0.25f && dia < 0.35f && dic < 0.35f) {
+                fm->candidate_onset_channel = 1;
+            } else if (dic > 1.4f * dia && dic > 1.4f * dib && dic > 0.25f && dia < 0.35f && dib < 0.35f) {
+                fm->candidate_onset_channel = 2;
+            } else {
+                fm->candidate_onset_channel = -1;
+            }
+        }
+    } else {
+        fm->kcl_exceed_count = 0;
+        fm->candidate_onset_channel = -1;
+    }
+    bool k_fault = (fm->kcl_exceed_count >= KCL_CONSECUTIVE_EXCEED_LIMIT);
 
     /* ---- Last-known-good kinematics ---- */
-    if (!k_fault && !fm->fault_latch_a && !fm->fault_latch_b && !fm->fault_latch_c && !fm->ambiguous_fault) {
+    if (!k_sample_exceed && !fm->fault_latch_a && !fm->fault_latch_b && !fm->fault_latch_c && !fm->ambiguous_fault) {
         fm->lkg_theta = theta;
         fm->lkg_omega = omega;
     } else {
@@ -66,7 +89,7 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
     fm->i_beta_pred  += (dt / fm->Ls) * (v_beta  - fm->Rs * fm->i_beta_pred  - e_beta);
 
     /* Stabilise predictor with measured currents only when healthy */
-    if (!k_fault && !fm->fault_latch_a && !fm->fault_latch_b && !fm->fault_latch_c && !fm->ambiguous_fault) {
+    if (!k_sample_exceed && !fm->fault_latch_a && !fm->fault_latch_b && !fm->fault_latch_c && !fm->ambiguous_fault) {
         float i_alpha_meas = (2.0f/3.0f) * (i_a - 0.5f*i_b - 0.5f*i_c);
         float i_beta_meas  = 0.57735027f * (i_b - i_c);
         fm->i_alpha_pred += 5000.0f * dt * (i_alpha_meas - fm->i_alpha_pred);
@@ -80,7 +103,7 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
 
     /* ==== 1. Recovery / Clearing ==== */
     if (fm->fault_latch_a || fm->fault_latch_b || fm->fault_latch_c || fm->ambiguous_fault) {
-        if (k_fault) {
+        if (k_sample_exceed) {
             fm->clear_timer = 0;
         } else {
             fm->clear_timer += dt;
@@ -94,16 +117,39 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                 fm->best_channel = -1;
                 fm->fault_isolation_timer = 0;
                 fm->unresolved_fault_timer = 0;
+                fm->healthy_residual_timer = 0;
             }
         }
     }
 
     /* ==== 2. Fault Isolation ==== */
     if (!fm->fault_latch_a && !fm->fault_latch_b && !fm->fault_latch_c && !fm->ambiguous_fault) {
+        /* Cancel isolation plus reset unresolved_fault_timer when the residual stays below threshold for a full window */
+        if (fm->fault_isolation_timer > 0.0f) {
+            if (!k_sample_exceed) {
+                fm->healthy_residual_timer += dt;
+                if (fm->healthy_residual_timer >= ISOLATION_WINDOW) {
+                    /* Abort isolation */
+                    fm->fault_isolation_timer = 0.0f;
+                    fm->unresolved_fault_timer = 0.0f;
+                    fm->healthy_residual_timer = 0.0f;
+                    fm->consecutive_confident = 0;
+                    fm->best_channel = -1;
+                    fm->onset_channel = -1;
+                    fm->candidate_onset_channel = -1;
+                    fm->err_acc_A = 0; fm->err_acc_B = 0; fm->err_acc_C = 0; fm->err_acc_Amb = 0;
+                    fm->E_acc = 0;
+                }
+            } else {
+                fm->healthy_residual_timer = 0.0f;
+            }
+        }
+
         if (k_fault && fm->fault_isolation_timer == 0.0f) {
             /* Start a new isolation window */
             fm->fault_isolation_timer = 0.00001f;
             fm->unresolved_fault_timer = 0.00001f;
+            fm->healthy_residual_timer = 0.0f;
             fm->err_acc_A = 0; fm->err_acc_B = 0; fm->err_acc_C = 0; fm->err_acc_Amb = 0;
             fm->E_acc = 0;
 
@@ -116,6 +162,8 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                 fm->onset_channel = 1;
             } else if (fm->stuck_count_c >= 8) {
                 fm->onset_channel = 2;
+            } else if (fm->candidate_onset_channel >= 0) {
+                fm->onset_channel = fm->candidate_onset_channel;
             } else if (dia > 1.4f * dib && dia > 1.4f * dic && dia > 0.25f && dib < 0.35f && dic < 0.35f) {
                 fm->onset_channel = 0;
             } else if (dib > 1.4f * dia && dib > 1.4f * dic && dib > 0.25f && dia < 0.35f && dic < 0.35f) {
@@ -126,6 +174,7 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                 fm->onset_channel = -1;
             }
         }
+
 
         if (fm->fault_isolation_timer > 0.0f) {
             fm->fault_isolation_timer += dt;
@@ -231,7 +280,12 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                         fm->best_channel = -1;
                     }
 
-                    if (fm->consecutive_confident >= 2) {
+                    int required_consecutive = (fm->onset_channel >= 0 ||
+                                                fm->stuck_count_a >= 10 ||
+                                                fm->stuck_count_b >= 10 ||
+                                                fm->stuck_count_c >= 10) ? 1 : 2;
+
+                    if (fm->consecutive_confident >= required_consecutive) {
                         /* Latch the identified faulty channel */
                         if (fm->best_channel == 0) fm->fault_latch_a = true;
                         else if (fm->best_channel == 1) fm->fault_latch_b = true;

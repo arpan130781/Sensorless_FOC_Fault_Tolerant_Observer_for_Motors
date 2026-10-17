@@ -34,6 +34,9 @@ typedef struct {
     int consecutive_confident;
     int best_channel;
     int onset_channel;
+    int kcl_exceed_count;
+    int candidate_onset_channel;
+    float healthy_residual_timer;
 } FaultMonitor;
 
 void fault_init(FaultMonitor* fm, float Rs, float Ls, float psi_f);
