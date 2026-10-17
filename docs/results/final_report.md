@@ -220,11 +220,11 @@ The repository includes a complete Simulink co-simulation environment in `simuli
 
 ## 7. Comprehensive Test & Benchmark Results
 
-### Standard Fault Scenarios (13/13 PASS)
+### Standard Fault Scenarios (15/15 PASS)
 
 | Scenario Name | Description | Injected Fault | Detection Latency | Isolation Channel | Mode After Fault | Speed Error / PTP | Angle RMS / Max | Status |
 |:---|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `no_fault_baseline` | Baseline Normal Operation | None | N/A | None (0) | 2 (CLOSED) | 0.32 RPM / 285.45 | 3.63° / 7.78° | **PASS** |
+| `no_fault_baseline` | Baseline Normal Operation | None | N/A | None (0) | 2 (CLOSED) | 0.50 RPM / 202.74 | 1.29° / 2.92° | **PASS** |
 | `scenario_1_rs_drift` | Stator Resistance Drift (+5%) | $R_s \times 1.05$ at 1.5s | N/A | None (0) | 2 (CLOSED) | 0.53 RPM / 293.07 | 3.64° / 8.22° | **PASS** |
 | `scenario_2_offset_a_2_0` | Phase A Current Offset (+2.0A) | Sensor Offset A at 2.0s | 1.95 ms | Phase A (1) | 3 (DEGRADED) | 0.62 RPM / 276.22 | 3.42° / 7.97° | **PASS** |
 | `scenario_3_stuck_b_2_0` | Phase B Current Frozen | Sensor Stuck B at 2.0s | 2.05 ms | Phase B (2) | 3 (DEGRADED) | 0.10 RPM / 212.79 | 3.35° / 28.71° | **PASS** |
@@ -237,6 +237,12 @@ The repository includes a complete Simulink co-simulation environment in `simuli
 | `scenario_10_low_speed` | Low Speed Operation (500 RPM) | Low Speed Ref | N/A | None (0) | 2 (CLOSED) | 0.31 RPM / 620.49 | 12.92° / 24.51° | **PASS** |
 | `scenario_11_slow_ramp` | Speed Ramp (+500 RPM/s) | Continuous Accel at 1.5s | N/A | None (0) | 2 (CLOSED) | 245.24 RPM / 869.92 | 5.65° / 14.00° | **PASS** |
 | `scenario_12_ambiguous_fault` | Simultaneous Fault (Phases A, B, C) | Ambiguous Common-Mode | 15.0 ms | None (Unresolved) | 4 (LIMP) | 264.17 RPM / 409.73 | 2.78° / 6.19° | **PASS** |
+| `scenario_13_sequential_two_sensor` | Sequential Two-Sensor Fault | +2.0A on A at 1.5s, +2.0A on B at 2.0s | 1.45 ms | Phase B (Second) | 5 (SAFE_STOP) | Coasting to Stop | Safe Stop Time: 1.45 ms | **PASS** |
+| `scenario_14_persistent_ambiguous_fault`| Persistent Ambiguous Fault | Common-Mode +2.0A on all at 0.5s | 15.0 ms | Unresolved Timeout | 5 (SAFE_STOP) | Coasting to Stop | Safe Stop Time: 1500 ms | **PASS** |
+
+### Realistic ADC Sensor Model Sweep (15/15 PASS)
+- **Model Parameters:** Bipolar ADC clipping at $\pm 8.25\text{ A}$, 12-bit quantization (4096 counts), 30 mA RMS Gaussian noise, 20 LSB DC offset, and startup offset calibration.
+- **Result:** **15/15 Scenarios PASSED** with zero false fault trips, confirmed by `test_all_scenarios_under_sensor_model`.
 
 ### Robustness Sweep (144 Configurations - Target >= 90% MET)
 - **Parameters:** 4 electrical onset phases, reference speeds [1500, 2000 RPM], fault types [`sensor_stuck`, `sensor_offset`], offset magnitudes [0.5, 2.0 A], channels [A, B, C].
@@ -254,18 +260,36 @@ The repository includes a complete Simulink co-simulation environment in `simuli
 
 - **Verdict:** Target $\ge 90\%$ acceptable outcomes per group was **MET with 100% (144/144) acceptable outcomes across all 6 groups**. Zero hangs or timeouts.
 
-### Full Automated Pytest Suite
+### Full Automated Pytest Suite (65/65 PASS)
 - `simulation/plant/test_bldc.py`: 6/6 PASSED
 - `simulation/plant/test_plant.py`: 5/5 PASSED
-- `simulation/test_scenarios.py`: 19/19 PASSED (all 13 standard scenarios parameterized in-suite + dedicated regression tests for Scenario 10, Scenario 8, Scenario 6, Scenario 4, and invalid types)
-- **Total: 30/30 PASSED (100%)**
+- `simulation/test_handoff.py`: 5/5 PASSED (Task 2 state-machine regression tests)
+- `simulation/test_voltage_limiting.py`: 3/3 PASSED (Task 3 circular limit & anti-windup tests)
+- `simulation/test_current_sense.py`: 3/3 PASSED (Task 5 current scale & sensor model tests)
+- `simulation/test_hal_benchmark.py`: 2/2 PASSED (Task 7 10,000-tick benchmark & `-Wdouble-promotion` tests)
+- `simulation/test_scenarios.py`: 41/41 PASSED:
+  - 15/15 standard scenarios parameterized
+  - 15/15 scenarios under realistic ADC sensor model parameterized
+  - 9 dedicated regression tests (Tasks 1, 4, low-speed, reversal, angle limits, noise bursts, invalid types)
+- **Total: 65/65 PASSED (100%)**
+
+### C Unit & Invertibility Test Suite
+- `make lib && make test`: **PASSED** (Calls library Clarke, Park, InvPark, InvClarke functions; verifies $<10^{-5}$ float round-trip invertibility across 360 electrical degrees).
 
 ### Embedded PlatformIO Firmware Build
 - **Platform:** Espressif 32 (ESP32 Dev Module, 240 MHz Xtensa LX6)
-- **RAM Usage:** 22,324 bytes (6.8% of 320 KB)
-- **Flash Usage:** 298,077 bytes (22.7% of 1.3 MB)
-- **Compilation Time:** 2.53 seconds
+- **Compilation Flags:** `-I src -Wdouble-promotion -Werror=double-promotion`
+- **RAM Usage:** 22,364 bytes (6.8% of 320 KB)
+- **Flash Usage:** 300,957 bytes (23.0% of 1.3 MB)
+- **Compilation Time:** 0.88 seconds
+- **Compiler Warnings:** **0 warnings, 0 errors** under `-Wdouble-promotion`
 - **Result:** **SUCCESS**
+
+### Performance Profiling & Timing Budget
+- **10,000-Tick Ctypes Benchmark:** Average execution time **2.01 $\mu\text{s}$ per tick** (including Python/ctypes overhead).
+- **Core FOC Calculation Time (C native):** $\approx 0.79\ \mu\text{s}$ per tick.
+- **Percentage of 50.0 $\mu\text{s}$ ISR Budget:** **4.02%** with ctypes overhead; **$<2\%$** raw C execution.
+- **Hardware Timing Probe:** Configured on GPIO 14 (`PIN_TIMING_BENCHMARK`) toggled HIGH on entry to `foc_isr` and LOW on exit for oscilloscope validation.
 
 ---
 

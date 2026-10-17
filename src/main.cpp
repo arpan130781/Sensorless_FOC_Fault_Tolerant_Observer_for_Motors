@@ -16,6 +16,7 @@
 
 extern "C" {
     #include "foc_api.h"
+    #include "motor_params.h"
 }
 
 // ============================================================================
@@ -76,14 +77,7 @@ volatile float telemetry_ia = 0.0f;
 volatile float telemetry_ib = 0.0f;
 volatile float telemetry_ic = 0.0f;
 
-// Motor Parameters
-static const float M_RS    = 0.5f;
-static const float M_LS    = 1.0e-3f;
-static const float M_PSI_F = 0.015f;
-static const int   M_P     = 4;
-static const float M_J     = 0.0001f;
-static const float M_B     = 0.001f;
-static const float M_VBUS  = 24.0f;
+// Motor & controller constants sourced from motor_params.h
 
 // Virtual Motor Plant States (for real-time simulation)
 static float sim_id = 0.0f;
@@ -220,21 +214,9 @@ void setup() {
     digitalWrite(PIN_GATE_EN, HIGH);
     digitalWrite(PIN_TIMING_BENCHMARK, LOW);
 
-    // Initialize Motor & Controller Parameters
-    MotorParams motor = {
-        .Rs = M_RS, .Ls = M_LS, .psi_f = M_PSI_F, .P = M_P,
-        .J = M_J, .B = M_B, .Vbus = M_VBUS, .In = 5.0f
-    };
-    
-    ControllerParams ctrl = {
-        .id_kp = 6.28f, .id_ki = 3142.0f,
-        .iq_kp = 6.28f, .iq_ki = 3142.0f,
-        .spd_kp = 0.194f, .spd_ki = 17.4f,
-        .smo_k = 20.0f, .smo_h = 0.5f, .smo_lpf = 50.0f,
-        .flux_wc = 125.6f,
-        .pwm_freq = 20000.0f, .ctrl_rate_curr = 20000.0f, .ctrl_rate_spd = 1000.0f
-    };
-
+    // Initialize Motor & Controller Parameters from canonical source of truth
+    MotorParams motor = get_default_motor_params();
+    ControllerParams ctrl = get_default_controller_params();
     foc_init(&motor, &ctrl);
     foc_set_speed_ref(1800.0f * (2.0f * (float)M_PI / 60.0f) * M_P); // Target: 1800 RPM electrical
 

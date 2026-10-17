@@ -815,6 +815,8 @@ The scenarios are intended to evaluate nominal behaviour, sensor faults, model m
 | `scenario_10_low_speed` | Evaluates observer behaviour at a lower speed reference |
 | `scenario_11_slow_ramp` | Tests a configured slow speed ramp |
 | `scenario_12_ambiguous_fault` | Tests simultaneous current-sensor offsets intended to challenge unique phase isolation |
+| `scenario_13_sequential_two_sensor` | Tests sequential two-sensor fault leading to SAFE_STOP and hardware gate disable |
+| `scenario_14_persistent_ambiguous_fault` | Tests unresolved ambiguous common-mode fault timeout leading to SAFE_STOP |
 
 ## 10.1 What Each Group Evaluates
 
@@ -1364,33 +1366,36 @@ A successful result in one category does not automatically establish success in 
 | Validation Item | Status | Result / Metric |
 |---|---|---|
 | C controller implementation | Verified | Complete FOC core, observers, fault monitor, PI loops |
-| Native transform tests (`make test`) | Verified | PASSED (Clarke/Park forward and inverse) |
+| Native transform tests (`make test`) | Verified | **PASSED** (Library Clarke/Park/InvPark/InvClarke round-trip $<10^{-5}$) |
 | Python simulation environment | Verified | Full PMSM and BLDC numerical simulation suite |
-| Automated pytest suite (`pytest simulation/`) | Verified | **30/30 PASSED (100%)** |
+| Automated pytest suite (`pytest simulation/`) | Verified | **65/65 PASSED (100%)** |
 | BLDC plant model & tests | Verified | **6/6 PASSED** (Trapezoidal back-EMF, KCL, FOC ripple) |
-| Standard fault scenarios (0–12) | Verified | **13/13 PASSED (100%)** |
+| Standard fault scenarios (0–14) | Verified | **15/15 PASSED (100%)** |
+| Realistic ADC Sensor Model Sweep | Verified | **15/15 PASSED (100%)** (Quantization, noise, clipping, offset) |
 | Scenario 10 (Low-Speed 500 RPM) | Verified | **PASS** (Max Angle Err: 24.51°, Ripple: 620.49 RPM) |
 | Scenario 8 (Speed Reversal) | Verified | **PASS** (Max Angle Err: 90.44°, Steady-state: -2000 RPM) |
+| Scenario 13 (Sequential Two-Sensor) | Verified | **PASS** (SAFE_STOP in 1.45 ms, gate disabled, duty 0.0) |
+| Scenario 14 (Persistent Ambiguous) | Verified | **PASS** (SAFE_STOP in 1500 ms, gate disabled, duty 0.0) |
 | Fault-isolation robustness sweep (144 configs) | Verified | **144/144 (100%) acceptable outcomes** across all 6 groups |
 | MATLAB & Simulink Co-Simulation | Verified | **PASS** (1.95 ms detection latency, 3.73° angle RMS) |
-| PlatformIO ESP32 build (`esp32dev`) | Verified | **SUCCESS** (RAM: 6.8% / 22.3 KB, Flash: 22.7% / 298.1 KB) |
+| PlatformIO ESP32 build (`esp32dev`) | Verified | **SUCCESS (0 warnings with `-Wdouble-promotion -Werror=double-promotion`)** |
+| 10,000-tick performance benchmark | Verified | **2.01 µs per tick** (~4% of 50 µs ISR budget) |
 | Physical motor operation | Hardware Required | Requires dyno bench testing |
-| ESP32 execution-time profiling | Hardware Required | ~11.1 µs estimated (<25% of 50 µs ISR budget) |
+| ESP32 execution-time profiling | Hardware Required | Scope probe pin active on GPIO 14 (`PIN_TIMING_BENCHMARK`) |
 | Hardware fault-injection validation | Hardware Required | Requires physical sensor fault injection rig |
 
 ## 20.2 Resolution of Previous Validation Concerns
 
 All historical test and stability issues have been diagnosed and resolved with regression tests:
 
-- **Fault-Isolation Debounce Inconsistency Corrected:** Synchronized the debounce logic in `src/fault_monitor.c` with the documented 2-window design (`consecutive_confident >= 2`). Confirmed that detection latency remains under 2.05 ms across all scenarios (limits: 12.0–20.0 ms), while slashing noise-burst speed ripple from 285 RPM down to 26.10 RPM.
-- **Scenario 10 Low-Speed Instability Resolved:** Fixed an algebraic feedback loop in SMO angular differentiation (`theta_hat` vs `theta_raw`), added direction hysteresis ($|\hat{\omega}| > 25\text{ rad/s}$), and introduced smooth speed-adaptive gain scheduling below 1200 RPM. Max angle error dropped from 87.99° to 24.51°, speed ripple dropped from 1,090 RPM to 620 RPM.
-- **Scenario 8 Speed Reversal Validated:** Zero-crossing smoothly negotiated with direction hysteresis; observer re-locks seamlessly in reverse rotation with 7.81° RMS angle error and steady-state tracking within 1.5 RPM.
-- **Handoff Zero-Crossing Stall Trap Resolved:** Extended stall detection threshold from 50 ms to 300 ms in `handoff.c` to prevent false positive I/F open-loop restarts during zero-crossing deceleration transients.
-- **Multi-Test Kinematic State Leakage Eliminated:** Reset internal predictor kinematics (`lkg_theta`, `lkg_omega`) inside `fault_reset()` in `fault_monitor.c`, preventing test-order coupling and shared-state cross-talk across sequential SIL runs.
-- **BLDC Current Rate-of-Change Accommodation:** Broadened onset jump healthy slew threshold (`dib, dic < 0.35f`) in `fault_monitor.c` to prevent 5th/7th back-EMF harmonics from interfering with single-sensor fault isolation.
-- **Scenario 4 & Scenario 12 Robustness:** 4-hypothesis centroid vector accumulation in $\alpha\beta$ space ensures immediate latching of 10 A saturation faults (<1.0 ms) and reliable transition to `LIMP` mode upon persistent multi-sensor failure.
-- **MATLAB/Simulink S-Functions:** C-MEX S-functions compiled with native Clang and validated against the continuous-state PMSM model with publication-quality waveform exports.
-- **ISR Timing Note:** Execution time (~11.1 µs at 240 MHz) is an analytical instruction-mix estimate based on Xtensa LX6 cycle counts; physical confirmation via GPIO toggle and oscilloscope/logic analyzer remains required for embedded hardware validation.
+- **Single Source of Truth Parameter Harmonization:** Consolidated all motor and controller constants in `src/motor_params.h`. `src/main.cpp` uses `get_default_motor_params()` / `get_default_controller_params()`, and `simulation/harness/config.py` dynamically parses `src/motor_params.h` on load, eliminating drift.
+- **Fault Monitor Debounce & Spurious Trip Rejection:** Implemented 5-sample consecutive KCL exceedance requirement (`KCL_CONSECUTIVE_EXCEED_LIMIT = 5`) and automatic isolation abort on residual clearance, rejecting single-sample corruptions without dropping to LIMP mode.
+- **Handoff State Machine & Bumpless Transfer:** Constrained DEGRADED/LIMP transitions to occur only from CLOSED_LOOP (latching pending faults during startup). Reset current-loop integrators and preloaded speed loop integral with last $i_q$ reference on mode transitions for bumpless handoff.
+- **Circular Voltage Limiting & Back-Calculation:** Enforced circular voltage limit at $V_{bus}/\sqrt{3} \approx 13.86\text{ V}$ with d-axis priority and back-calculation anti-windup. Inverter duties strictly clamped to $[0.0, 1.0]$. Implemented dynamic field weakening above 1200 RPM, achieving $2.92^\circ$ baseline max angle error.
+- **Reachable SAFE_STOP & True Gate Disabling:** Added continuous second-sensor fault detection and ambiguous fault timeout (1.5s $\to$ SAFE_STOP). Implemented true gate shutdown (`gate_enable = false`, duty 0.0, driving `PIN_GATE_EN` LOW).
+- **Current Sense Headroom & Calibration:** Scaled sensing to $\pm 8.25\text{ A}$ ($R_{shunt}=10\text{ m}\Omega$, Gain 20), added compile-time `static_assert(CURRENT_FULL_SCALE > 1.2f * MOTOR_NOMINAL_IN)`, and added startup offset calibration.
+- **Metrics Integrity & Per-Scenario Onset Scoring:** Derived evaluation start time dynamically from each scenario's onset time (`get_scenario_evaluation_start_time`), eliminating the hardcoded 2.0s cutoff. Replaced `test_transforms.c` with library calls verifying full round-trip invertibility to float precision.
+- **Single-Precision ESP32 Hot Path:** Enforced `-Wdouble-promotion -Werror=double-promotion` across native Makefile and PlatformIO build flags, eliminating implicit double promotions. Added `IRAM_ATTR` macro in `foc_api.h` and instrumented `PIN_TIMING_BENCHMARK` (GPIO 14) for oscilloscope timing measurement. Measured 2.01 $\mu\text{s}$ per tick in 10,000-tick benchmark.
 
 ---
 

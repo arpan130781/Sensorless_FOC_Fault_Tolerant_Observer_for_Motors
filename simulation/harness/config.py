@@ -1,5 +1,11 @@
 import os
 import sys
+import re
+
+# ============================================================================
+# SINGLE SOURCE OF TRUTH: Load from src/motor_params.h
+# ============================================================================
+_header_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'motor_params.h'))
 
 MOTOR_PARAMS = {
     'Rs': 0.5,
@@ -29,9 +35,39 @@ CONTROLLER_PARAMS = {
     'ctrl_rate_spd': 1000.0
 }
 
+if os.path.exists(_header_path):
+    with open(_header_path, 'r') as _f:
+        _content = _f.read()
+    _defines = dict(re.findall(r'#define\s+([A-Za-z0-9_]+)\s+([^\s/]+)', _content))
+    if 'MOTOR_PARAM_RS' in _defines:
+        MOTOR_PARAMS['Rs'] = float(_defines['MOTOR_PARAM_RS'].rstrip('f'))
+        MOTOR_PARAMS['Ls'] = float(_defines['MOTOR_PARAM_LS'].rstrip('f'))
+        MOTOR_PARAMS['psi_f'] = float(_defines['MOTOR_PARAM_PSI_F'].rstrip('f'))
+        MOTOR_PARAMS['P'] = int(_defines['MOTOR_PARAM_POLE_PAIRS'])
+        MOTOR_PARAMS['J'] = float(_defines['MOTOR_PARAM_J'].rstrip('f'))
+        MOTOR_PARAMS['B'] = float(_defines['MOTOR_PARAM_B'].rstrip('f'))
+        MOTOR_PARAMS['Vbus'] = float(_defines['MOTOR_PARAM_VBUS'].rstrip('f'))
+        MOTOR_PARAMS['In'] = float(_defines['MOTOR_PARAM_IN'].rstrip('f'))
+
+    if 'CTRL_PARAM_ID_KP' in _defines:
+        CONTROLLER_PARAMS['id_kp'] = float(_defines['CTRL_PARAM_ID_KP'].rstrip('f'))
+        CONTROLLER_PARAMS['id_ki'] = float(_defines['CTRL_PARAM_ID_KI'].rstrip('f'))
+        CONTROLLER_PARAMS['iq_kp'] = float(_defines['CTRL_PARAM_IQ_KP'].rstrip('f'))
+        CONTROLLER_PARAMS['iq_ki'] = float(_defines['CTRL_PARAM_IQ_KI'].rstrip('f'))
+        CONTROLLER_PARAMS['spd_kp'] = float(_defines['CTRL_PARAM_SPD_KP'].rstrip('f'))
+        CONTROLLER_PARAMS['spd_ki'] = float(_defines['CTRL_PARAM_SPD_KI'].rstrip('f'))
+        CONTROLLER_PARAMS['smo_k'] = float(_defines['CTRL_PARAM_SMO_K'].rstrip('f'))
+        CONTROLLER_PARAMS['smo_h'] = float(_defines['CTRL_PARAM_SMO_H'].rstrip('f'))
+        CONTROLLER_PARAMS['smo_lpf'] = float(_defines['CTRL_PARAM_SMO_LPF'].rstrip('f'))
+        CONTROLLER_PARAMS['flux_wc'] = float(_defines['CTRL_PARAM_FLUX_WC'].rstrip('f'))
+        CONTROLLER_PARAMS['observer_select'] = int(_defines['CTRL_PARAM_OBS_SELECT'])
+        CONTROLLER_PARAMS['pwm_freq'] = float(_defines['CTRL_PARAM_PWM_FREQ'].rstrip('f'))
+        CONTROLLER_PARAMS['ctrl_rate_curr'] = float(_defines['CTRL_PARAM_CTRL_CURR'].rstrip('f'))
+        CONTROLLER_PARAMS['ctrl_rate_spd'] = float(_defines['CTRL_PARAM_CTRL_SPD'].rstrip('f'))
+
 SIM_PARAMS = {
-    'dt_control': 1 / 20000.0,
-    'dt_plant': 1 / 100000.0,
+    'dt_control': 1.0 / CONTROLLER_PARAMS['pwm_freq'],
+    'dt_plant': 1.0 / 100000.0,
     'total_time': 3.0,
     'speed_ref_rpm': 2000.0
 }
@@ -49,4 +85,3 @@ PATHS = {
     'lib_path': _lib_path,
     'faults_yaml': os.path.join(os.path.dirname(__file__), '..', 'fault_injection', 'fault_scenarios.yaml')
 }
-
