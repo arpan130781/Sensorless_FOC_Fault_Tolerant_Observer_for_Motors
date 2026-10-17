@@ -1,5 +1,6 @@
 import numpy as np
-from simulation.harness.sil_runner import SILRunner, SIM_PARAMS
+from simulation.harness.sil_runner import SILRunner, SIM_PARAMS, get_scenario_evaluation_start_time
+from simulation.plant.sensor_model import SensorModel
 from simulation.analysis.metrics import evaluate_scenario, compute_max_angle_error
 from simulation.fault_injection.fault_injector import NullFaultInjector
 import yaml
@@ -97,7 +98,7 @@ def test_scenario_6_noise_burst_recovery():
     
     evaluation = evaluate_scenario(res, criteria, onset, 
                                    ref_speed=SIM_PARAMS['speed_ref_rpm'], 
-                                   start_time=2.0, 
+                                   start_time=get_scenario_evaluation_start_time(sc_conf), 
                                    expected_fault_channel=expected_ch, 
                                    expected_mode_after_fault=expected_mode,
                                    disturbance_duration=sc_conf.get('duration', 0.1))
@@ -219,9 +220,10 @@ def test_all_scenarios_execute_and_pass(scenario_name):
     runner = SILRunner(config_sim=SIM_PARAMS, fault_scenario=scenario_name)
     res = runner.run()
 
+    start_time = get_scenario_evaluation_start_time(sc_conf)
     evaluation = evaluate_scenario(
         res, criteria, onset, ref_speed,
-        start_time=2.0,
+        start_time=start_time,
         expected_fault_channel=expected_ch,
         expected_mode_after_fault=expected_mode,
         disturbance_duration=sc_conf.get('duration', 0.0),
@@ -230,6 +232,52 @@ def test_all_scenarios_execute_and_pass(scenario_name):
 
     for crit, data in evaluation.items():
         assert bool(data['pass']), f"Scenario '{scenario_name}' failed criterion '{crit}': {data}"
+
+
+@pytest.mark.parametrize("scenario_name", _ALL_SCENARIOS)
+def test_all_scenarios_under_sensor_model(scenario_name):
+    """
+    Task 6 regression test:
+    Verify that all 14 scenarios execute and pass under realistic ADC sensor model
+    (quantization, noise, clipping, and offset calibration).
+    """
+    with open('simulation/fault_injection/fault_scenarios.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+
+    sc_conf = config[scenario_name]
+    criteria = dict(sc_conf.get('expected_outcome', {}).get('criteria', {}))
+    if scenario_name == 'no_fault_baseline':
+        criteria.pop('settling_time', None)
+    onset = sc_conf.get('expected_outcome', {}).get('fault_onset_time', float('inf'))
+    expected_ch = sc_conf.get('expected_outcome', {}).get('expected_fault_channel', 0)
+    expected_mode = sc_conf.get('expected_outcome', {}).get('expected_mode_after_fault', 2)
+    ref_speed = sc_conf.get('speed_reversal', {}).get('new_speed_rpm', sc_conf.get('speed_ref_rpm', SIM_PARAMS['speed_ref_rpm']))
+    if 'slow_ramp' in sc_conf:
+        rate = sc_conf['slow_ramp']['rate_rpm_per_s']
+        duration = SIM_PARAMS['total_time'] - sc_conf['slow_ramp']['onset_time']
+        ref_speed = ref_speed + rate * duration
+
+    trans_time = 0.0
+    if 'speed_reversal' in sc_conf: trans_time = sc_conf['speed_reversal'].get('onset_time', 0.0)
+    elif 'load_step' in sc_conf: trans_time = sc_conf['load_step'].get('onset_time', 0.0)
+    elif 'slow_ramp' in sc_conf: trans_time = sc_conf['slow_ramp'].get('onset_time', 0.0)
+
+    start_time = get_scenario_evaluation_start_time(sc_conf)
+    sensor = SensorModel()
+    runner = SILRunner(config_sim=SIM_PARAMS, fault_scenario=scenario_name, sensor_model=sensor)
+    res = runner.run()
+
+    evaluation = evaluate_scenario(
+        res, criteria, onset, ref_speed,
+        start_time=start_time,
+        expected_fault_channel=expected_ch,
+        expected_mode_after_fault=expected_mode,
+        disturbance_duration=sc_conf.get('duration', 0.0),
+        transition_time=trans_time
+    )
+
+    for crit, data in evaluation.items():
+        assert bool(data['pass']), f"Scenario '{scenario_name}' under sensor model failed criterion '{crit}': {data}"
 
 
 class SingleSampleSpikeInjector(NullFaultInjector):

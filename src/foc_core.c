@@ -63,6 +63,31 @@ void foc_reset(void) {
 void foc_set_speed_ref(float omega_ref_rads) { current_omega_ref = omega_ref_rads; }
 void foc_set_torque_ref(float iq_ref_A) { current_iq_ref = iq_ref_A; }
 
+void clarke_transform(float a, float b, float c, float* alpha, float* beta) {
+    if (alpha) *alpha = (2.0f / 3.0f) * (a - 0.5f * b - 0.5f * c);
+    if (beta)  *beta  = (2.0f / 3.0f) * ((sqrtf(3.0f) / 2.0f) * b - (sqrtf(3.0f) / 2.0f) * c);
+}
+
+void park_transform(float alpha, float beta, float theta, float* d, float* q) {
+    float c = cosf(theta);
+    float s = sinf(theta);
+    if (d) *d =  alpha * c + beta * s;
+    if (q) *q = -alpha * s + beta * c;
+}
+
+void inv_park_transform(float d, float q, float theta, float* alpha, float* beta) {
+    float c = cosf(theta);
+    float s = sinf(theta);
+    if (alpha) *alpha = d * c - q * s;
+    if (beta)  *beta  = d * s + q * c;
+}
+
+void inv_clarke_transform(float alpha, float beta, float* a, float* b, float* c) {
+    if (a) *a = alpha;
+    if (b) *b = -0.5f * alpha + (sqrtf(3.0f) / 2.0f) * beta;
+    if (c) *c = -0.5f * alpha - (sqrtf(3.0f) / 2.0f) * beta;
+}
+
 FocOutput foc_tick(const FocInput* input) {
 
     FocOutput out = {0};
@@ -77,9 +102,9 @@ FocOutput foc_tick(const FocInput* input) {
     float ib = fs.i_b_rec;
     float ic = fs.i_c_rec;
     
-    // Clarke
-    float i_alpha = (2.0f/3.0f) * (ia - 0.5f*ib - 0.5f*ic);
-    float i_beta  = (2.0f/3.0f) * ((sqrtf(3.0f)/2.0f)*ib - (sqrtf(3.0f)/2.0f)*ic);
+    // Clarke transform
+    float i_alpha, i_beta;
+    clarke_transform(ia, ib, ic, &i_alpha, &i_beta);
     
     // Previous v_alpha/beta applied
     
@@ -177,10 +202,8 @@ FocOutput foc_tick(const FocInput* input) {
     last_applied_iq_ref = iq_ref;
     
     // Park
-    float c = cosf(angle);
-    float s = sinf(angle);
-    float id =  i_alpha * c + i_beta * s;
-    float iq = -i_alpha * s + i_beta * c;
+    float id, iq;
+    park_transform(i_alpha, i_beta, angle, &id, &iq);
     
     // PI
     float err_d = id_ref - id;
@@ -232,17 +255,16 @@ FocOutput foc_tick(const FocInput* input) {
     }
 
     // Inv Park (uses circularly limited voltages)
-    float valpha = vd * c - vq * s;
-    float vbeta  = vd * s + vq * c;
+    float valpha, vbeta;
+    inv_park_transform(vd, vq, angle, &valpha, &vbeta);
     
     // Observers receive the limited voltages that the inverter can apply
     prev_v_alpha = valpha;
     prev_v_beta = vbeta;
     
     // SVM
-    float va = valpha;
-    float vb = -0.5f*valpha + (sqrtf(3.0f)/2.0f)*vbeta;
-    float vc = -0.5f*valpha - (sqrtf(3.0f)/2.0f)*vbeta;
+    float va, vb, vc;
+    inv_clarke_transform(valpha, vbeta, &va, &vb, &vc);
     
     float vmin = fminf(va, fminf(vb, vc));
     float vmax = fmaxf(va, fmaxf(vb, vc));

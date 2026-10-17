@@ -10,10 +10,27 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from simulation.plant.pmsm_model import PMSMModel
 from simulation.plant.inverter_model import duties_to_voltages, phase_to_dq
+from simulation.plant.sensor_model import SensorModel
 from simulation.fault_injection.fault_injector import FaultInjector, NullFaultInjector
 from simulation.harness.config import MOTOR_PARAMS, CONTROLLER_PARAMS, SIM_PARAMS, PATHS
 from simulation.harness.c_bridge import FocController
 from simulation.analysis.metrics import evaluate_scenario
+
+def get_scenario_evaluation_start_time(sc_conf):
+    """
+    Returns the evaluation start time for a given scenario:
+    scores each scenario from its own fault_onset_time or load/reversal onset.
+    """
+    if not sc_conf:
+        return 2.0
+    exp = sc_conf.get('expected_outcome', {})
+    if 'fault_onset_time' in exp and exp['fault_onset_time'] < float('inf'):
+        return float(exp['fault_onset_time'])
+    if 'load_step' in sc_conf:
+        return float(sc_conf['load_step'].get('onset_time', 1.5))
+    if 'speed_reversal' in sc_conf:
+        return float(sc_conf['speed_reversal'].get('onset_time', 2.0))
+    return 2.0
 
 @dataclass
 class SimulationResult:
@@ -193,10 +210,12 @@ class SILRunner:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--scenario', type=str, default='no_fault_baseline')
+    parser.add_argument('--sensor-model', action='store_true', help='Enable realistic ADC sensor model')
     parser.add_argument('--no-plot', action='store_true')
     args = parser.parse_args()
     
-    runner = SILRunner(config_sim=SIM_PARAMS, fault_scenario=args.scenario)
+    sensor = SensorModel() if args.sensor_model else None
+    runner = SILRunner(config_sim=SIM_PARAMS, fault_scenario=args.scenario, sensor_model=sensor)
     res = runner.run()
     
     # Save the scenario parameters
@@ -234,7 +253,8 @@ if __name__ == '__main__':
         elif 'load_step' in sc_conf: trans_time = sc_conf['load_step'].get('onset_time', 0.0)
         elif 'slow_ramp' in sc_conf: trans_time = sc_conf['slow_ramp'].get('onset_time', 0.0)
         
-        evaluation = evaluate_scenario(res, criteria, onset, ref_speed, start_time=2.0, 
+        start_time = get_scenario_evaluation_start_time(sc_conf)
+        evaluation = evaluate_scenario(res, criteria, onset, ref_speed, start_time=start_time, 
                                        expected_fault_channel=expected_ch, expected_mode_after_fault=expected_mode, disturbance_duration=sc_conf.get('duration', 0.0), transition_time=trans_time)
         
         all_passed = True
@@ -256,7 +276,7 @@ if __name__ == '__main__':
             'angle_error_rms': 5.0,
             'speed_ripple_ptp': 350.0,
             'mean_speed': 20.0
-        }, start_time=2.0, expected_mode_after_fault=2)
+        }, start_time=get_scenario_evaluation_start_time(None), expected_mode_after_fault=2)
         
         all_passed = True
         print(f"\nEvaluation for {args.scenario}:")
