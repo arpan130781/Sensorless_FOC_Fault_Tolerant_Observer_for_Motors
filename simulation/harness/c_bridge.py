@@ -16,6 +16,7 @@ class FocOutput(ctypes.Structure):
         ("duty_a", ctypes.c_float),
         ("duty_b", ctypes.c_float),
         ("duty_c", ctypes.c_float),
+        ("gate_enable", ctypes.c_bool),
         ("theta_hat", ctypes.c_float),
         ("omega_hat", ctypes.c_float),
         ("health_score", ctypes.c_float),

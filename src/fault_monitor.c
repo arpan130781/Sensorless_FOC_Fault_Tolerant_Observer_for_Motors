@@ -25,6 +25,10 @@ void fault_reset(FaultMonitor* fm) {
     fm->kcl_exceed_count = 0;
     fm->candidate_onset_channel = -1;
     fm->ambiguous_fault = false;
+    fm->safe_stop_latched = false;
+    fm->ambiguous_timer = 0.0f;
+    fm->second_fault_timer = 0.0f;
+    fm->post_latch_settling_timer = 0.0f;
     fm->consecutive_confident = 0; fm->best_channel = -1;
     fm->err_acc_A = 0; fm->err_acc_B = 0; fm->err_acc_C = 0; fm->err_acc_Amb = 0; fm->E_acc = 0;
     fm->i_alpha_pred = 0; fm->i_beta_pred = 0;
@@ -43,10 +47,22 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
     float dib = fabsf(i_b - fm->prev_i_b);
     float dic = fabsf(i_c - fm->prev_i_c);
 
-    /* ---- Stuck-sensor detection ---- */
-    if (dia < 0.0001f) fm->stuck_count_a++; else fm->stuck_count_a = 0;
-    if (dib < 0.0001f) fm->stuck_count_b++; else fm->stuck_count_b = 0;
-    if (dic < 0.0001f) fm->stuck_count_c++; else fm->stuck_count_c = 0;
+    /* ---- Stuck-sensor detection (only when motor is spinning) ---- */
+    if (fabsf(omega) > 50.0f) {
+        if (dia < 0.0001f) fm->stuck_count_a++; else fm->stuck_count_a = 0;
+        if (dib < 0.0001f) fm->stuck_count_b++; else fm->stuck_count_b = 0;
+        if (dic < 0.0001f) fm->stuck_count_c++; else fm->stuck_count_c = 0;
+    } else {
+        fm->stuck_count_a = 0;
+        fm->stuck_count_b = 0;
+        fm->stuck_count_c = 0;
+    }
+
+    /* Post-latch transient settling countdown */
+    if (fm->post_latch_settling_timer > 0.0f) {
+        fm->post_latch_settling_timer -= dt;
+        fm->second_fault_timer = 0.0f;
+    }
 
     /* ---- KCL residual and debounce ---- */
     float E = i_a + i_b + i_c;
@@ -88,12 +104,30 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
     fm->i_alpha_pred += (dt / fm->Ls) * (v_alpha - fm->Rs * fm->i_alpha_pred - e_alpha);
     fm->i_beta_pred  += (dt / fm->Ls) * (v_beta  - fm->Rs * fm->i_beta_pred  - e_beta);
 
-    /* Stabilise predictor with measured currents only when healthy */
-    if (!k_sample_exceed && !fm->fault_latch_a && !fm->fault_latch_b && !fm->fault_latch_c && !fm->ambiguous_fault) {
+    int num_latched = (fm->fault_latch_a ? 1 : 0) +
+                      (fm->fault_latch_b ? 1 : 0) +
+                      (fm->fault_latch_c ? 1 : 0);
+
+    /* Stabilise predictor with measured currents when healthy */
+    if (num_latched == 0 && !k_sample_exceed && !fm->ambiguous_fault) {
         float i_alpha_meas = (2.0f/3.0f) * (i_a - 0.5f*i_b - 0.5f*i_c);
         float i_beta_meas  = 0.57735027f * (i_b - i_c);
         fm->i_alpha_pred += 5000.0f * dt * (i_alpha_meas - fm->i_alpha_pred);
         fm->i_beta_pred  += 5000.0f * dt * (i_beta_meas  - fm->i_beta_pred);
+    } else if (num_latched == 1 && !fm->safe_stop_latched) {
+        /* Track reconstructed currents in degraded mode while residual is healthy */
+        float ia_v = fm->fault_latch_a ? -(i_b + i_c) : i_a;
+        float ib_v = fm->fault_latch_b ? -(i_a + i_c) : i_b;
+        float ic_v = fm->fault_latch_c ? -(i_a + i_b) : i_c;
+        float i_alpha_rec = (2.0f/3.0f) * (ia_v - 0.5f*ib_v - 0.5f*ic_v);
+        float i_beta_rec  = 0.57735027f * (ib_v - ic_v);
+        float da = i_alpha_rec - fm->i_alpha_pred;
+        float db = i_beta_rec - fm->i_beta_pred;
+        float r_pred = sqrtf(da * da + db * db);
+        if (r_pred < 1.0f) {
+            fm->i_alpha_pred += 2000.0f * dt * da;
+            fm->i_beta_pred  += 2000.0f * dt * db;
+        }
     }
 
     /* ---- Clear fault-status flags for this tick ---- */
@@ -101,8 +135,18 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
     fm->status.sensor_fault_b = false;
     fm->status.sensor_fault_c = false;
 
+    /* If SAFE_STOP is latched, it remains permanently latched until foc_reset() */
+    if (fm->safe_stop_latched) {
+        fm->status.sensor_fault_a = fm->fault_latch_a;
+        fm->status.sensor_fault_b = fm->fault_latch_b;
+        fm->status.sensor_fault_c = fm->fault_latch_c;
+        fm->status.i_a_rec = i_a; fm->status.i_b_rec = i_b; fm->status.i_c_rec = i_c;
+        fm->status.degradation_state = SAFE_STOP;
+        return fm->status;
+    }
+
     /* ==== 1. Recovery / Clearing ==== */
-    if (fm->fault_latch_a || fm->fault_latch_b || fm->fault_latch_c || fm->ambiguous_fault) {
+    if (!fm->safe_stop_latched && (fm->fault_latch_a || fm->fault_latch_b || fm->fault_latch_c || fm->ambiguous_fault)) {
         if (k_sample_exceed) {
             fm->clear_timer = 0;
         } else {
@@ -118,6 +162,8 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                 fm->fault_isolation_timer = 0;
                 fm->unresolved_fault_timer = 0;
                 fm->healthy_residual_timer = 0;
+                fm->ambiguous_timer = 0.0f;
+                fm->second_fault_timer = 0.0f;
             }
         }
     }
@@ -291,6 +337,7 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                         else if (fm->best_channel == 1) fm->fault_latch_b = true;
                         else fm->fault_latch_c = true;
                         fm->ambiguous_fault = false;
+                        fm->post_latch_settling_timer = 0.050f;
                     } else if (fm->unresolved_fault_timer > 0.015f) {
                         /* After 15ms without confident single isolation -> ambiguous */
                         fm->ambiguous_fault = true;
@@ -305,11 +352,84 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
         }
     }
 
+    /* Count currently latched channels */
+    num_latched = (fm->fault_latch_a ? 1 : 0) +
+                  (fm->fault_latch_b ? 1 : 0) +
+                  (fm->fault_latch_c ? 1 : 0);
+
+    /* Monitor remaining healthy channels for a second sensor fault when 1 channel is already degraded */
+    if (num_latched == 1 && !fm->safe_stop_latched && fm->post_latch_settling_timer <= 0.0f && fabsf(omega) > 50.0f) {
+        float ia_v = fm->fault_latch_a ? -(i_b + i_c) : i_a;
+        float ib_v = fm->fault_latch_b ? -(i_a + i_c) : i_b;
+        float ic_v = fm->fault_latch_c ? -(i_a + i_b) : i_c;
+        float i_alpha_rec = (2.0f/3.0f) * (ia_v - 0.5f*ib_v - 0.5f*ic_v);
+        float i_beta_rec  = 0.57735027f * (ib_v - ic_v);
+        float da = i_alpha_rec - fm->i_alpha_pred;
+        float db = i_beta_rec - fm->i_beta_pred;
+        float r_pred = sqrtf(da * da + db * db);
+
+        bool second_fault = false;
+        int second_channel = -1;
+
+        if (fm->fault_latch_a) {
+            bool stuck = (fm->stuck_count_b >= 10 || fm->stuck_count_c >= 10);
+            bool jump = (dib > 1.0f || dic > 1.0f);
+            bool res_bad = (r_pred > 1.2f);
+            if (stuck || jump || res_bad) {
+                second_fault = true;
+                second_channel = (fm->stuck_count_b >= 10 || dib > 1.0f) ? 1 : 2;
+            }
+        } else if (fm->fault_latch_b) {
+            bool stuck = (fm->stuck_count_a >= 10 || fm->stuck_count_c >= 10);
+            bool jump = (dia > 1.0f || dic > 1.0f);
+            bool res_bad = (r_pred > 1.2f);
+            if (stuck || jump || res_bad) {
+                second_fault = true;
+                second_channel = (fm->stuck_count_a >= 10 || dia > 1.0f) ? 0 : 2;
+            }
+        } else if (fm->fault_latch_c) {
+            bool stuck = (fm->stuck_count_a >= 10 || fm->stuck_count_b >= 10);
+            bool jump = (dia > 1.0f || dib > 1.0f);
+            bool res_bad = (r_pred > 1.2f);
+            if (stuck || jump || res_bad) {
+                second_fault = true;
+                second_channel = (fm->stuck_count_a >= 10 || dia > 1.0f) ? 0 : 1;
+            }
+        }
+
+        if (second_fault) {
+            fm->second_fault_timer += dt;
+            if (fm->second_fault_timer >= 0.020f) {
+                if (second_channel == 0) fm->fault_latch_a = true;
+                else if (second_channel == 1) fm->fault_latch_b = true;
+                else fm->fault_latch_c = true;
+                fm->safe_stop_latched = true;
+            }
+        } else {
+            fm->second_fault_timer = 0.0f;
+        }
+    }
+
+    /* Ambiguous fault timeout -> SAFE_STOP (persisting longer than 1.5 s) */
+    if (fm->ambiguous_fault && !fm->safe_stop_latched) {
+        fm->ambiguous_timer += dt;
+        if (fm->ambiguous_timer >= 1.5f) {
+            fm->safe_stop_latched = true;
+        }
+    } else if (!fm->ambiguous_fault) {
+        fm->ambiguous_timer = 0.0f;
+    }
+
+    num_latched = (fm->fault_latch_a ? 1 : 0) +
+                  (fm->fault_latch_b ? 1 : 0) +
+                  (fm->fault_latch_c ? 1 : 0);
+
     /* ==== 3. Output Reconstruction & Mode ==== */
-    if (fm->fault_latch_a && fm->fault_latch_b && fm->fault_latch_c) {
-        fm->status.sensor_fault_a = true;
-        fm->status.sensor_fault_b = true;
-        fm->status.sensor_fault_c = true;
+    if (fm->safe_stop_latched || num_latched >= 2) {
+        fm->safe_stop_latched = true;
+        fm->status.sensor_fault_a = fm->fault_latch_a;
+        fm->status.sensor_fault_b = fm->fault_latch_b;
+        fm->status.sensor_fault_c = fm->fault_latch_c;
         fm->status.i_a_rec = i_a; fm->status.i_b_rec = i_b; fm->status.i_c_rec = i_c;
         fm->status.degradation_state = SAFE_STOP;
     }

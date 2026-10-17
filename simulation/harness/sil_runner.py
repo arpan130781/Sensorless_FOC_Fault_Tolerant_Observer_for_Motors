@@ -120,7 +120,10 @@ class SILRunner:
             out = self.controller.tick(ia_corr, ib_corr, ic_corr, vbus)
             
             # Plant step
-            va, vb, vc = duties_to_voltages(out.duty_a, out.duty_b, out.duty_c, vbus, ia, ib, ic)  # true currents -> dead-time polarity
+            if hasattr(out, 'gate_enable') and not out.gate_enable:
+                va, vb, vc = 0.0, 0.0, 0.0
+            else:
+                va, vb, vc = duties_to_voltages(out.duty_a, out.duty_b, out.duty_c, vbus, ia, ib, ic)  # true currents -> dead-time polarity
             
             load = 0.0
             if self.scenario_config and 'load_step' in self.scenario_config:

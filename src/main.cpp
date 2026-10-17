@@ -30,6 +30,7 @@ extern "C" {
 #define PIN_LED_NORMAL      18   // Green LED (Closed loop normal)
 #define PIN_LED_DEGRADED    19   // Yellow LED (Fault isolated, 2-shunt fallback)
 #define PIN_LED_FAULT       21   // Red LED (Limp / Safe Stop)
+#define PIN_GATE_EN         22   // Gate driver hardware enable pin (Active HIGH)
 
 #define PIN_BTN_FAULT       15   // Pushbutton: Inject sensor fault (Active LOW)
 #define PIN_SW_MODE          4   // Switch: LOW = Virtual Motor, HIGH = Real ADC
@@ -126,20 +127,28 @@ void IRAM_ATTR foc_isr() {
     // Execute FOC Control Step
     FocOutput foc_out = foc_tick(&foc_in);
 
-    // Apply PWM outputs safely clamped to [0.0f, 1.0f]
-    float da = fmaxf(0.0f, fminf(1.0f, foc_out.duty_a));
-    float db = fmaxf(0.0f, fminf(1.0f, foc_out.duty_b));
-    float dc = fmaxf(0.0f, fminf(1.0f, foc_out.duty_c));
-    ledcWrite(0, (uint32_t)(da * PWM_MAX));
-    ledcWrite(1, (uint32_t)(db * PWM_MAX));
-    ledcWrite(2, (uint32_t)(dc * PWM_MAX));
+    // Apply PWM outputs safely clamped to [0.0f, 1.0f], or disable gates on SAFE_STOP
+    if (foc_out.gate_enable) {
+        digitalWrite(PIN_GATE_EN, HIGH);
+        float da = fmaxf(0.0f, fminf(1.0f, foc_out.duty_a));
+        float db = fmaxf(0.0f, fminf(1.0f, foc_out.duty_b));
+        float dc = fmaxf(0.0f, fminf(1.0f, foc_out.duty_c));
+        ledcWrite(0, (uint32_t)(da * PWM_MAX));
+        ledcWrite(1, (uint32_t)(db * PWM_MAX));
+        ledcWrite(2, (uint32_t)(dc * PWM_MAX));
+    } else {
+        digitalWrite(PIN_GATE_EN, LOW);
+        ledcWrite(0, 0);
+        ledcWrite(1, 0);
+        ledcWrite(2, 0);
+    }
 
     if (use_virtual_motor) {
         // Advance virtual motor plant by dt = 50 microseconds
         float dt = 50.0e-6f;
-        float v_a = (foc_out.duty_a - 0.5f) * M_VBUS;
-        float v_b = (foc_out.duty_b - 0.5f) * M_VBUS;
-        float v_c = (foc_out.duty_c - 0.5f) * M_VBUS;
+        float v_a = foc_out.gate_enable ? (foc_out.duty_a - 0.5f) * M_VBUS : 0.0f;
+        float v_b = foc_out.gate_enable ? (foc_out.duty_b - 0.5f) * M_VBUS : 0.0f;
+        float v_c = foc_out.gate_enable ? (foc_out.duty_c - 0.5f) * M_VBUS : 0.0f;
 
         float v_alpha = (2.0f/3.0f) * (v_a - 0.5f*v_b - 0.5f*v_c);
         float v_beta  = 0.57735027f * (v_b - v_c);
@@ -192,12 +201,14 @@ void setup() {
     pinMode(PIN_LED_NORMAL, OUTPUT);
     pinMode(PIN_LED_DEGRADED, OUTPUT);
     pinMode(PIN_LED_FAULT, OUTPUT);
+    pinMode(PIN_GATE_EN, OUTPUT);
     pinMode(PIN_BTN_FAULT, INPUT_PULLUP);
     pinMode(PIN_SW_MODE, INPUT_PULLUP);
 
     digitalWrite(PIN_LED_NORMAL, LOW);
     digitalWrite(PIN_LED_DEGRADED, LOW);
     digitalWrite(PIN_LED_FAULT, LOW);
+    digitalWrite(PIN_GATE_EN, HIGH);
 
     // Initialize Motor & Controller Parameters
     MotorParams motor = {

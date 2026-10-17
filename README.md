@@ -544,9 +544,7 @@ An ambiguous fault should not automatically be treated as a known single-phase f
 
 The intended behaviour is to enter a limited mode rather than confidently reconstructing a phase from invalid assumptions.
 
-The actual transition and recovery behaviour must be checked against the source and verified through the configured scenarios.
-
-The SAFE_STOP duty-cycle behaviour in software must also be validated against the real inverter and gate-driver design before hardware deployment.
+The SAFE_STOP state actively disables inverter gate drivers by asserting `gate_enable = false`, setting all PWM phase duty cycles to 0.0 (rather than 0.5 neutral duty), and pulling hardware `PIN_GATE_EN` LOW in firmware. This output-disable state remains latched until an explicit reset (`foc_reset`).
 
 ---
 

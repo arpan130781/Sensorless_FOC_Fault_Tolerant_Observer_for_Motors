@@ -281,3 +281,46 @@ def test_single_sample_spike_rejection(phase, offset):
     assert pct_dip <= 3.0, f"Speed dipped by {pct_dip:.2f}% (> 3.0%) on spike {phase} {offset}A (extra dip {extra_dip:.2f} RPM)"
 
 
+def test_safe_stop_reachable_on_second_fault_and_ambiguous():
+    """
+    Task 4 regression test:
+    Verify that:
+    1. Sequential two-sensor fault enters SAFE_STOP (mode 5) with safe_stop_time <= 50 ms.
+    2. Persistent ambiguous fault enters SAFE_STOP (mode 5) with safe_stop_time <= 1600 ms.
+    3. SAFE_STOP disables gate driver pulses (duty_a=0, duty_b=0, duty_c=0).
+    4. Once in SAFE_STOP, control_mode is permanently latched at 5 until foc_reset().
+    """
+    with open('simulation/fault_injection/fault_scenarios.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+
+    # 1. Sequential two-sensor fault
+    sc13 = config['scenario_13_sequential_two_sensor']
+    runner13 = SILRunner(config_sim=SIM_PARAMS, fault_scenario='scenario_13_sequential_two_sensor')
+    res13 = runner13.run()
+    ev13 = evaluate_scenario(res13, sc13['expected_outcome']['criteria'], 
+                             sc13['expected_outcome']['fault_onset_time'],
+                             ref_speed=SIM_PARAMS['speed_ref_rpm'],
+                             start_time=sc13['expected_outcome']['fault_onset_time'],
+                             expected_mode_after_fault=5)
+    assert ev13['expected_mode']['pass'], f"Scenario 13 failed to reach mode 5: {ev13}"
+    assert ev13['safe_stop_time']['pass'], f"Scenario 13 safe_stop_time failed: {ev13}"
+    safe_idx13 = np.where(res13.control_mode == 5)[0]
+    assert np.all(res13.control_mode[safe_idx13[0]:] == 5), "SAFE_STOP unlatched before reset"
+    assert np.all(res13.duty_a[safe_idx13[0]:] == 0.0), "duty_a not 0 in SAFE_STOP"
+    assert np.all(res13.duty_b[safe_idx13[0]:] == 0.0), "duty_b not 0 in SAFE_STOP"
+    assert np.all(res13.duty_c[safe_idx13[0]:] == 0.0), "duty_c not 0 in SAFE_STOP"
+
+    # 2. Persistent ambiguous fault
+    sc14 = config['scenario_14_persistent_ambiguous_fault']
+    runner14 = SILRunner(config_sim=SIM_PARAMS, fault_scenario='scenario_14_persistent_ambiguous_fault')
+    res14 = runner14.run()
+    ev14 = evaluate_scenario(res14, sc14['expected_outcome']['criteria'],
+                             sc14['expected_outcome']['fault_onset_time'],
+                             ref_speed=SIM_PARAMS['speed_ref_rpm'],
+                             start_time=sc14['expected_outcome']['fault_onset_time'],
+                             expected_mode_after_fault=5)
+    assert ev14['expected_mode']['pass'], f"Scenario 14 failed to reach mode 5: {ev14}"
+    assert ev14['safe_stop_time']['pass'], f"Scenario 14 safe_stop_time failed: {ev14}"
+
+
+

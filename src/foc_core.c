@@ -118,6 +118,10 @@ FocOutput foc_tick(const FocInput* input) {
             speed_est = 0.0f;
         }
 
+        // Allow settling window on any mode transition before second fault monitoring
+        fault.post_latch_settling_timer = 0.200f;
+        fault.second_fault_timer = 0.0f;
+
         last_mode = mode;
     }
 
@@ -250,7 +254,14 @@ FocOutput foc_tick(const FocInput* input) {
     out.duty_b = fminf(1.0f, fmaxf(0.0f, (vb / input->v_bus) + 0.5f));
     out.duty_c = fminf(1.0f, fmaxf(0.0f, (vc / input->v_bus) + 0.5f));
     
-    if (mode == SAFE_STOP) { out.duty_a = 0.5f; out.duty_b = 0.5f; out.duty_c = 0.5f; }
+    if (mode == SAFE_STOP) {
+        out.gate_enable = false;
+        out.duty_a = 0.0f;
+        out.duty_b = 0.0f;
+        out.duty_c = 0.0f;
+    } else {
+        out.gate_enable = true;
+    }
     
     out.theta_hat = angle;
     out.omega_hat = obs_omega;

@@ -283,4 +283,4 @@ While the control algorithms and software simulations have been fully verified, 
 4. **Physical Shunt Resistor Tolerances and Thermal Drift:**
    - Real shunt resistors have $\pm 1\%$ manufacturing tolerance and thermal drift. The fault monitor's KCL threshold (`KCL_THRESH = 0.3A`) must be calibrated against actual circuit noise floor and common-mode rejection ratio (CMRR) of operational amplifiers.
 5. **Gate Driver Hardware Fault Interlocks:**
-   - Software `SAFE_STOP` disables gate pulses in software. A physical production design requires a dedicated hardware comparator trip line wired directly to gate driver disable pins (e.g. FLT / EN) for nanosecond shoot-through protection.
+   - Software `SAFE_STOP` actively disables gate pulses by asserting `gate_enable = false`, commanding 0.0 duty cycle (eliminating previous 0.5 midpoint biasing), and driving `PIN_GATE_EN` LOW. A physical production design should additionally preserve a dedicated hardware comparator trip line wired directly to gate driver disable pins (e.g. FLT / EN) for nanosecond shoot-through protection.

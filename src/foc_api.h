@@ -10,6 +10,7 @@ typedef struct {
 
 typedef struct {
     float duty_a, duty_b, duty_c;
+    bool gate_enable;
     float theta_hat, omega_hat, health_score;
     int control_mode;
     float i_d, i_q;

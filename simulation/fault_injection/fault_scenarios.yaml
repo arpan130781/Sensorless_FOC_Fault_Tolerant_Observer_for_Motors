@@ -191,3 +191,42 @@ scenario_12_ambiguous_fault:
       angle_error_rms: 20.0
       max_angle_error: 80.0
       speed_ripple_ptp: 1000.0
+scenario_13_sequential_two_sensor:
+  description: Sequential two-sensor fault leading to SAFE_STOP
+  type: simultaneous
+  faults:
+  - type: sensor_offset
+    channel: a
+    offset: 2.0
+    onset_time: 1.5
+  - type: sensor_offset
+    channel: b
+    offset: 2.0
+    onset_time: 2.0
+  expected_outcome:
+    fault_onset_time: 2.0
+    expected_mode_after_fault: 5
+    criteria:
+      safe_stop_time: 50.0
+scenario_14_persistent_ambiguous_fault:
+  description: Persistent ambiguous fault exceeding timeout leading to SAFE_STOP
+  type: simultaneous
+  faults:
+  - type: sensor_offset
+    channel: a
+    offset: 2.0
+    onset_time: 0.5
+  - type: sensor_offset
+    channel: b
+    offset: 2.0
+    onset_time: 0.5
+  - type: sensor_offset
+    channel: c
+    offset: 2.0
+    onset_time: 0.5
+  expected_outcome:
+    fault_onset_time: 0.5
+    expected_mode_after_fault: 5
+    criteria:
+      safe_stop_time: 1600.0
+

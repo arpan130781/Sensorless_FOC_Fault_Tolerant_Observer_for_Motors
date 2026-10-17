@@ -31,6 +31,10 @@ typedef struct {
     int stuck_count_a, stuck_count_b, stuck_count_c;
 
     bool ambiguous_fault;
+    bool safe_stop_latched;
+    float ambiguous_timer;
+    float second_fault_timer;
+    float post_latch_settling_timer;
     int consecutive_confident;
     int best_channel;
     int onset_channel;
