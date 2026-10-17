@@ -10,3 +10,4 @@ typedef struct {
 void pi_init(PIController* pi, float kp, float ki, float min, float max);
 void pi_reset(PIController* pi);
 float pi_update(PIController* pi, float error, float dt);
+void pi_back_calculate(PIController* pi, float limited_output, float error);

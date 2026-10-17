@@ -16,8 +16,11 @@ def phase_to_dq(v_a: float, v_b: float, v_c: float, theta_e: float):
 
 def duties_to_voltages(duty_a: float, duty_b: float, duty_c: float, v_bus: float, i_a: float = 0.0, i_b: float = 0.0, i_c: float = 0.0, v_dead: float = 0.5):
     """ Converts PWM duty cycles [0, 1] to phase voltages relative to neutral. Includes dead-time distortion. """
-    # Apply dead-time voltage drop based on current polarity
     import numpy as np
+    duty_a = float(np.clip(duty_a, 0.0, 1.0))
+    duty_b = float(np.clip(duty_b, 0.0, 1.0))
+    duty_c = float(np.clip(duty_c, 0.0, 1.0))
+    # Apply dead-time voltage drop based on current polarity
     v_a_gnd = duty_a * v_bus - np.sign(i_a) * v_dead
     v_b_gnd = duty_b * v_bus - np.sign(i_b) * v_dead
     v_c_gnd = duty_c * v_bus - np.sign(i_c) * v_dead

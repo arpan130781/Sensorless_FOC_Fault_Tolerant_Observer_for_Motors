@@ -24,3 +24,12 @@ float pi_update(PIController* pi, float error, float dt) {
     
     return pi->output;
 }
+
+void pi_back_calculate(PIController* pi, float limited_output, float error) {
+    float desired_integral = limited_output - (error * pi->kp);
+    if (desired_integral > pi->output_max) desired_integral = pi->output_max;
+    if (desired_integral < pi->output_min) desired_integral = pi->output_min;
+    pi->integral = desired_integral;
+    pi->output = limited_output;
+}
+
