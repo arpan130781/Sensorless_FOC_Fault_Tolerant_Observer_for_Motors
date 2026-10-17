@@ -8,6 +8,7 @@ typedef struct {
     float lkg_theta; // last known good theta
     float lkg_omega;
     float stall_timer;
+    int pending_fault_state;
 } Handoff;
 
 void handoff_init(Handoff* h);

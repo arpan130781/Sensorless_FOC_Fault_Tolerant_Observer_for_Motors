@@ -13,6 +13,7 @@ void handoff_reset(Handoff* h) {
     h->lkg_theta = 0.0f;
     h->lkg_omega = 0.0f;
     h->stall_timer = 0.0f;
+    h->pending_fault_state = CLOSED_LOOP;
 }
 
 int handoff_update(Handoff* h, float obs_health, float obs_disagree, float obs_omega, bool startup_done, int fault_degradation_state, float dt) {
@@ -26,39 +27,70 @@ int handoff_update(Handoff* h, float obs_health, float obs_disagree, float obs_o
     if (fault_degradation_state == SAFE_STOP) {
         if (h->current_mode != SAFE_STOP) {
             h->current_mode = SAFE_STOP;
-            h->time_in_state = 0;
+            h->time_in_state = 0.0f;
         }
         return SAFE_STOP;
     }
     
     if (h->current_mode == SAFE_STOP) return SAFE_STOP;
 
-    if (fault_degradation_state == CLOSED_LOOP && (h->current_mode == DEGRADED || h->current_mode == LIMP)) { h->current_mode = CLOSED_LOOP; h->time_in_state = 0; }
-    else if (fault_degradation_state == DEGRADED && h->current_mode != DEGRADED) {
-        h->current_mode = DEGRADED;
-        h->time_in_state = 0;
-    } else if (fault_degradation_state == LIMP && h->current_mode != LIMP) {
-        h->current_mode = LIMP;
-        h->time_in_state = 0;
-    }
-
     if (h->current_mode == ALIGN) {
+        // Latch pending fault during startup so it is applied after handoff
+        if (fault_degradation_state == DEGRADED || fault_degradation_state == LIMP) {
+            h->pending_fault_state = fault_degradation_state;
+        } else if (fault_degradation_state == CLOSED_LOOP) {
+            h->pending_fault_state = CLOSED_LOOP;
+        }
         if (h->time_in_state > 0.5f) {
             h->current_mode = OPEN_LOOP;
-            h->time_in_state = 0;
+            h->time_in_state = 0.0f;
         }
     } else if (h->current_mode == OPEN_LOOP) {
+        // Latch pending fault during startup so it is applied after handoff
+        if (fault_degradation_state == DEGRADED || fault_degradation_state == LIMP) {
+            h->pending_fault_state = fault_degradation_state;
+        } else if (fault_degradation_state == CLOSED_LOOP) {
+            h->pending_fault_state = CLOSED_LOOP;
+        }
         if (startup_done && obs_health > 0.6f && obs_disagree < 1.5f && fabsf(obs_omega) > 20.0f) {
             h->current_mode = CLOSED_LOOP;
-            h->time_in_state = 0;
+            h->time_in_state = 0.0f;
         }
     } else if (h->current_mode == CLOSED_LOOP) {
-        
-        if (fabsf(obs_omega) < 10.0f) {
+        int target_fault = (h->pending_fault_state != CLOSED_LOOP) ? h->pending_fault_state : fault_degradation_state;
+        if (target_fault == DEGRADED) {
+            h->current_mode = DEGRADED;
+            h->time_in_state = 0.0f;
+            h->pending_fault_state = CLOSED_LOOP;
+        } else if (target_fault == LIMP) {
+            h->current_mode = LIMP;
+            h->time_in_state = 0.0f;
+            h->pending_fault_state = CLOSED_LOOP;
+        } else if (fabsf(obs_omega) < 10.0f) {
             h->stall_timer += dt;
             if (h->stall_timer > 0.30f) { // 300 ms true stall timeout
                 h->current_mode = OPEN_LOOP; // Fallback to I/F
-                h->time_in_state = 0;
+                h->time_in_state = 0.0f;
+                h->stall_timer = 0.0f;
+            }
+        } else {
+            h->stall_timer = 0.0f;
+        }
+    } else if (h->current_mode == DEGRADED || h->current_mode == LIMP) {
+        if (fault_degradation_state == CLOSED_LOOP) {
+            h->current_mode = CLOSED_LOOP;
+            h->time_in_state = 0.0f;
+        } else if (fault_degradation_state == DEGRADED && h->current_mode != DEGRADED) {
+            h->current_mode = DEGRADED;
+            h->time_in_state = 0.0f;
+        } else if (fault_degradation_state == LIMP && h->current_mode != LIMP) {
+            h->current_mode = LIMP;
+            h->time_in_state = 0.0f;
+        } else if (fabsf(obs_omega) < 10.0f) {
+            h->stall_timer += dt;
+            if (h->stall_timer > 0.30f) {
+                h->current_mode = OPEN_LOOP;
+                h->time_in_state = 0.0f;
                 h->stall_timer = 0.0f;
             }
         } else {
@@ -68,3 +100,4 @@ int handoff_update(Handoff* h, float obs_health, float obs_disagree, float obs_o
 
     return h->current_mode;
 }
+

@@ -26,6 +26,8 @@ static float safe_stop_timer = 0.0f;
 static float prev_v_alpha = 0.0f;
 static float prev_v_beta = 0.0f;
 static float speed_est = 0.0f;
+static int last_mode = ALIGN;
+static float last_applied_iq_ref = 0.0f;
 
 void foc_init(const MotorParams* m, const ControllerParams* c) {
     motor = *m;
@@ -52,6 +54,8 @@ void foc_reset(void) {
     prev_v_alpha = 0.0f;
     prev_v_beta = 0.0f;
     speed_est = 0.0f;
+    last_mode = ALIGN;
+    last_applied_iq_ref = 0.0f;
 }
 
 void foc_set_speed_ref(float omega_ref_rads) { current_omega_ref = omega_ref_rads; }
@@ -81,12 +85,43 @@ FocOutput foc_tick(const FocInput* input) {
     obs_mgr_update(&obs_mgr, prev_v_alpha, prev_v_beta, i_alpha, i_beta, speed_est, dt_curr);
 
     float obs_omega = obs_mgr_get_omega(&obs_mgr);
-    
     speed_est = obs_omega;
+
+    // Startup
+    float forced_theta, id_start, iq_start;
+    bool done;
+    if_startup_update(&startup, dt_curr, &forced_theta, &id_start, &iq_start, &done);
     
+    // Handoff state machine
+    int mode = handoff_update(&handoff, obs_mgr.health, obs_mgr.disagreement, obs_omega, done, fs.degradation_state, dt_curr);
+
+    // Mode transition handling
+    if (mode != last_mode) {
+        // Reset current-loop integrators
+        pi_reset(&pi_id);
+        pi_reset(&pi_iq);
+
+        // Preload pi_spd integral with last applied iq reference for bumpless transfer
+        float preload = last_applied_iq_ref;
+        if (preload > pi_spd.output_max) preload = pi_spd.output_max;
+        if (preload < pi_spd.output_min) preload = pi_spd.output_min;
+        pi_spd.integral = preload;
+        pi_spd.output = preload;
+        current_iq_ref = preload;
+
+        // Reset startup and observers on fallback to OPEN_LOOP from closed-loop states
+        if (last_mode >= CLOSED_LOOP && mode == OPEN_LOOP) {
+            if_startup_reset(&startup);
+            obs_mgr_reset(&obs_mgr);
+            speed_est = 0.0f;
+        }
+
+        last_mode = mode;
+    }
+
     // Speed loop
     if (tick_counter == 0) {
-        if (handoff.current_mode == CLOSED_LOOP || handoff.current_mode == DEGRADED || handoff.current_mode == LIMP) {
+        if (mode == CLOSED_LOOP || mode == DEGRADED || mode == LIMP) {
             float err = current_omega_ref - obs_omega;
 
             // Speed-adaptive gain scaling: at low speeds, scale down spd_kp and spd_ki to maintain damping margin
@@ -100,10 +135,10 @@ FocOutput foc_tick(const FocInput* input) {
 
             current_iq_ref = pi_update(&pi_spd, err, dt_spd);
             
-            if (handoff.current_mode == DEGRADED) {
+            if (mode == DEGRADED) {
                 if (current_iq_ref > motor.In * 0.8f) current_iq_ref = motor.In * 0.8f;
                 if (current_iq_ref < -motor.In * 0.8f) current_iq_ref = -motor.In * 0.8f;
-            } else if (handoff.current_mode == LIMP) {
+            } else if (mode == LIMP) {
                 if (current_iq_ref > motor.In * 0.4f) current_iq_ref = motor.In * 0.4f;
                 if (current_iq_ref < -motor.In * 0.4f) current_iq_ref = -motor.In * 0.4f;
             }
@@ -111,15 +146,7 @@ FocOutput foc_tick(const FocInput* input) {
     }
     tick_counter++;
     if (tick_counter >= (int)(ctrl.pwm_freq / ctrl.ctrl_rate_spd)) tick_counter = 0;
-    
-    // Startup
-    float forced_theta, id_start, iq_start;
-    bool done;
-    if_startup_update(&startup, dt_curr, &forced_theta, &id_start, &iq_start, &done);
-    
-    // Handoff state machine
-    int mode = handoff_update(&handoff, obs_mgr.health, obs_mgr.disagreement, obs_omega, done, fs.degradation_state, dt_curr);
-    
+
     // Blending 
     float angle = 0.0f;
     float id_ref = 0.0f;
@@ -139,6 +166,7 @@ FocOutput foc_tick(const FocInput* input) {
         iq_ref = 0.0f;
         safe_stop_timer += dt_curr;
     }
+    last_applied_iq_ref = iq_ref;
     
     // Park
     float c = cosf(angle);
