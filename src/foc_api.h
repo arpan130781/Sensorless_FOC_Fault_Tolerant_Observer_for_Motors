@@ -39,15 +39,23 @@ typedef struct {
     float pwm_freq, ctrl_rate_curr, ctrl_rate_spd;
 } ControllerParams;
 
+#ifndef IRAM_ATTR
+#if defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
+#include <esp_attr.h>
+#else
+#define IRAM_ATTR
+#endif
+#endif
+
 void foc_init(const MotorParams* motor, const ControllerParams* ctrl);
-FocOutput foc_tick(const FocInput* input);
+IRAM_ATTR FocOutput foc_tick(const FocInput* input);
 void foc_reset(void);
 void foc_set_speed_ref(float omega_ref_rads);
 void foc_set_torque_ref(float iq_ref_A);
 
-/* Library Clarke and Park transforms */
-void clarke_transform(float a, float b, float c, float* alpha, float* beta);
-void park_transform(float alpha, float beta, float theta, float* d, float* q);
-void inv_park_transform(float d, float q, float theta, float* alpha, float* beta);
-void inv_clarke_transform(float alpha, float beta, float* a, float* b, float* c);
+/* Library Clarke and Park transforms (IRAM_ATTR for zero cache-miss latency) */
+IRAM_ATTR void clarke_transform(float a, float b, float c, float* alpha, float* beta);
+IRAM_ATTR void park_transform(float alpha, float beta, float theta, float* d, float* q);
+IRAM_ATTR void inv_park_transform(float d, float q, float theta, float* alpha, float* beta);
+IRAM_ATTR void inv_clarke_transform(float alpha, float beta, float* a, float* b, float* c);
 

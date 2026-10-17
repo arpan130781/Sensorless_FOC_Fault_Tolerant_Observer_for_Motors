@@ -44,7 +44,7 @@ void foc_reset(void) {
     pi_init(&pi_spd, ctrl.spd_kp, ctrl.spd_ki, -motor.In, motor.In);
     
     obs_mgr_init(&obs_mgr, motor.Rs, motor.Ls, motor.psi_f, ctrl.smo_k, ctrl.smo_h, ctrl.smo_lpf, ctrl.flux_wc, ctrl.observer_select);
-    if_startup_init(&startup, 2.0f, 0.5f, 2.0f*M_PI*30.0f, 200.0f);
+    if_startup_init(&startup, 2.0f, 0.5f, 2.0f * (float)M_PI * 30.0f, 200.0f);
     handoff_init(&handoff);
     fault_init(&fault, motor.Rs, motor.Ls, motor.psi_f);
     

@@ -28,9 +28,9 @@ void obs_mgr_update(ObserverManager* mgr, float v_alpha, float v_beta, float i_a
     float theta_flux = flux_obs_get_theta(&mgr->flux);
     
     float diff = theta_smo - theta_flux;
-    diff = fmodf(diff + M_PI, 2.0f * M_PI);
-    if (diff < 0) diff += 2.0f * M_PI;
-    diff -= M_PI;
+    diff = fmodf(diff + (float)M_PI, 2.0f * (float)M_PI);
+    if (diff < 0.0f) diff += 2.0f * (float)M_PI;
+    diff -= (float)M_PI;
     mgr->disagreement = fabsf(diff);
     mgr->emf_mag = smo_get_emf_magnitude(&mgr->smo);
     
@@ -46,7 +46,7 @@ void obs_mgr_update(ObserverManager* mgr, float v_alpha, float v_beta, float i_a
     mgr->confidence_flux = mgr->flux_health;
     
     // Reduce confidence based on disagreement
-    float h_disagree = 1.0f - 0.5f * (mgr->disagreement / M_PI);
+    float h_disagree = 1.0f - 0.5f * (mgr->disagreement / (float)M_PI);
     if (h_disagree < 0.0f) h_disagree = 0.0f;
     
     mgr->confidence_smo *= h_disagree;

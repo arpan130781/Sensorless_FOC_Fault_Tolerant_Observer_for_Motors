@@ -34,8 +34,8 @@ void flux_obs_update(FluxObserver* obs, float v_alpha, float v_beta, float i_alp
     obs->theta_hat = atan2f(rotor_flux_beta, rotor_flux_alpha);
     
     float dtheta = obs->theta_hat - obs->prev_theta;
-    if (dtheta > M_PI) dtheta -= 2.0f * M_PI;
-    if (dtheta < -M_PI) dtheta += 2.0f * M_PI;
+    if (dtheta > (float)M_PI)  dtheta -= 2.0f * (float)M_PI;
+    if (dtheta < -(float)M_PI) dtheta += 2.0f * (float)M_PI;
     obs->omega_hat += 50.0f * dt * ((dtheta / dt) - obs->omega_hat);
     
     obs->prev_theta = obs->theta_hat;

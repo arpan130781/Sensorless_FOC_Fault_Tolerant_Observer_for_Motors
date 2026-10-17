@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <driver/gpio.h>
 
 /* 
  * Sensorless FOC for ESP32 - Hardware Abstraction Layer (HAL) & Virtual Simulation
@@ -10,6 +11,7 @@
  *   without requiring a physical motor connected.
  * - Fault Injection: Press button on GPIO 15 to inject a sensor offset fault.
  * - Status LEDs: Green (Normal), Yellow (Degraded), Red (Limp / Safe Stop).
+ * - Timing Benchmark: GPIO 14 toggled HIGH during ISR execution for oscilloscope timing measurement.
  */
 
 extern "C" {
@@ -31,6 +33,7 @@ extern "C" {
 #define PIN_LED_DEGRADED    19   // Yellow LED (Fault isolated, 2-shunt fallback)
 #define PIN_LED_FAULT       21   // Red LED (Limp / Safe Stop)
 #define PIN_GATE_EN         22   // Gate driver hardware enable pin (Active HIGH)
+#define PIN_TIMING_BENCHMARK 14  // Scope probe pin: HIGH during ISR execution
 
 #define PIN_BTN_FAULT       15   // Pushbutton: Inject sensor fault (Active LOW)
 #define PIN_SW_MODE          4   // Switch: LOW = Virtual Motor, HIGH = Real ADC
@@ -92,6 +95,7 @@ static float sim_theta_e = 0.0f;
 // 20kHz HARDWARE TIMER ISR
 // ============================================================================
 void IRAM_ATTR foc_isr() {
+    gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 1);
     portENTER_CRITICAL_ISR(&timerMux);
 
     float ia = 0.0f;
@@ -102,15 +106,10 @@ void IRAM_ATTR foc_isr() {
     bool inject_fault = (digitalRead(PIN_BTN_FAULT) == LOW);
 
     if (use_virtual_motor) {
-        // Compute phase currents from virtual PMSM state
-        float c_th = cosf(sim_theta_e);
-        float s_th = sinf(sim_theta_e);
-        float i_alpha = sim_id * c_th - sim_iq * s_th;
-        float i_beta  = sim_id * s_th + sim_iq * c_th;
-
-        ia = i_alpha;
-        ib = -0.5f * i_alpha + 0.8660254f * i_beta;
-        ic = -0.5f * i_alpha - 0.8660254f * i_beta;
+        // Compute phase currents from virtual PMSM state using library transforms
+        float i_alpha, i_beta;
+        inv_park_transform(sim_id, sim_iq, sim_theta_e, &i_alpha, &i_beta);
+        inv_clarke_transform(i_alpha, i_beta, &ia, &ib, &ic);
 
         // Interactive fault injection: inject +2.0A bias on Phase A when button pressed
         if (inject_fault) {
@@ -118,9 +117,9 @@ void IRAM_ATTR foc_isr() {
         }
     } else {
         // Read external physical ADC shunts
-        float a_raw = analogRead(PIN_SENSE_A);
-        float b_raw = analogRead(PIN_SENSE_B);
-        float c_raw = analogRead(PIN_SENSE_C);
+        float a_raw = (float)analogRead(PIN_SENSE_A);
+        float b_raw = (float)analogRead(PIN_SENSE_B);
+        float c_raw = (float)analogRead(PIN_SENSE_C);
 
         ia = (a_raw - adc_offset_a) * CURRENT_SCALE;
         ib = (b_raw - adc_offset_b) * CURRENT_SCALE;
@@ -143,9 +142,9 @@ void IRAM_ATTR foc_isr() {
         float da = fmaxf(0.0f, fminf(1.0f, foc_out.duty_a));
         float db = fmaxf(0.0f, fminf(1.0f, foc_out.duty_b));
         float dc = fmaxf(0.0f, fminf(1.0f, foc_out.duty_c));
-        ledcWrite(0, (uint32_t)(da * PWM_MAX));
-        ledcWrite(1, (uint32_t)(db * PWM_MAX));
-        ledcWrite(2, (uint32_t)(dc * PWM_MAX));
+        ledcWrite(0, (uint32_t)(da * (float)PWM_MAX));
+        ledcWrite(1, (uint32_t)(db * (float)PWM_MAX));
+        ledcWrite(2, (uint32_t)(dc * (float)PWM_MAX));
     } else {
         digitalWrite(PIN_GATE_EN, LOW);
         ledcWrite(0, 0);
@@ -160,19 +159,17 @@ void IRAM_ATTR foc_isr() {
         float v_b = foc_out.gate_enable ? (foc_out.duty_b - 0.5f) * M_VBUS : 0.0f;
         float v_c = foc_out.gate_enable ? (foc_out.duty_c - 0.5f) * M_VBUS : 0.0f;
 
-        float v_alpha = (2.0f/3.0f) * (v_a - 0.5f*v_b - 0.5f*v_c);
-        float v_beta  = 0.57735027f * (v_b - v_c);
+        float v_alpha, v_beta;
+        clarke_transform(v_a, v_b, v_c, &v_alpha, &v_beta);
 
-        float c_th = cosf(sim_theta_e);
-        float s_th = sinf(sim_theta_e);
-        float v_d =  v_alpha * c_th + v_beta * s_th;
-        float v_q = -v_alpha * s_th + v_beta * c_th;
+        float v_d, v_q;
+        park_transform(v_alpha, v_beta, sim_theta_e, &v_d, &v_q);
 
-        float omega_e = M_P * sim_omega_m;
+        float omega_e = (float)M_P * sim_omega_m;
         float di_d = (1.0f / M_LS) * (v_d - M_RS * sim_id + omega_e * M_LS * sim_iq);
         float di_q = (1.0f / M_LS) * (v_q - M_RS * sim_iq - omega_e * M_LS * sim_id - omega_e * M_PSI_F);
 
-        float t_e = 1.5f * M_P * M_PSI_F * sim_iq;
+        float t_e = 1.5f * (float)M_P * M_PSI_F * sim_iq;
         float domega_m = (1.0f / M_J) * (t_e - M_B * sim_omega_m);
 
         sim_id += di_d * dt;
@@ -186,7 +183,7 @@ void IRAM_ATTR foc_isr() {
 
     // Export telemetry
     telemetry_theta = foc_out.theta_hat;
-    telemetry_speed_rpm = foc_out.omega_hat * (60.0f / (2.0f * (float)M_PI * M_P));
+    telemetry_speed_rpm = foc_out.omega_hat * (60.0f / (2.0f * (float)M_PI * (float)M_P));
     telemetry_health = foc_out.health_score;
     telemetry_mode = foc_out.control_mode;
     telemetry_ia = ia;
@@ -194,6 +191,7 @@ void IRAM_ATTR foc_isr() {
     telemetry_ic = ic;
 
     portEXIT_CRITICAL_ISR(&timerMux);
+    gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 0);
 }
 
 // ============================================================================
@@ -212,6 +210,7 @@ void setup() {
     pinMode(PIN_LED_DEGRADED, OUTPUT);
     pinMode(PIN_LED_FAULT, OUTPUT);
     pinMode(PIN_GATE_EN, OUTPUT);
+    pinMode(PIN_TIMING_BENCHMARK, OUTPUT);
     pinMode(PIN_BTN_FAULT, INPUT_PULLUP);
     pinMode(PIN_SW_MODE, INPUT_PULLUP);
 
@@ -219,6 +218,7 @@ void setup() {
     digitalWrite(PIN_LED_DEGRADED, LOW);
     digitalWrite(PIN_LED_FAULT, LOW);
     digitalWrite(PIN_GATE_EN, HIGH);
+    digitalWrite(PIN_TIMING_BENCHMARK, LOW);
 
     // Initialize Motor & Controller Parameters
     MotorParams motor = {
@@ -261,7 +261,7 @@ void setup() {
     adc_offset_a = sum_a / (float)CAL_SAMPLES;
     adc_offset_b = sum_b / (float)CAL_SAMPLES;
     adc_offset_c = sum_c / (float)CAL_SAMPLES;
-    Serial.printf("[HAL] Calibrated ADC offsets: A=%.1f, B=%.1f, C=%.1f\n", adc_offset_a, adc_offset_b, adc_offset_c);
+    Serial.printf("[HAL] Calibrated ADC offsets: A=%.1f, B=%.1f, C=%.1f\n", (double)adc_offset_a, (double)adc_offset_b, (double)adc_offset_c);
 
     // 20kHz Hardware Interrupt Timer
     foc_timer = timerBegin(0, 80, true); 
