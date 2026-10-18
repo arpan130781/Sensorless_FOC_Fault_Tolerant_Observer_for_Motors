@@ -140,9 +140,23 @@ class SILRunner:
             # Controller
             out = self.controller.tick(ia_corr, ib_corr, ic_corr, vbus)
             
-            # Plant step
-            if hasattr(out, 'gate_enable') and not out.gate_enable:
-                va, vb, vc = 0.0, 0.0, 0.0
+            gate_en = getattr(out, 'gate_enable', True)
+            if not gate_en:
+                # High-impedance mode: all inverter switches OFF.
+                # Body diodes conduct only when line-to-line back-EMF exceeds DC bus (rectification)
+                # or while rapidly quenching existing inductor energy. Otherwise, phase currents are zero.
+                omega_e = self.plant.omega_e
+                e_ll_pk = math.sqrt(3.0) * self.plant.psi_f * abs(omega_e)
+                if e_ll_pk > vbus:
+                    # Diode bridge rectifies into bus, clamping terminal voltage opposing rotation
+                    vd = 0.0
+                    vq = -math.copysign(vbus / math.sqrt(3.0), omega_e)
+                else:
+                    # Open-circuit back-EMF terminal voltages for logging
+                    th = self.plant.theta_e
+                    va = -self.plant.psi_f * omega_e * math.sin(th)
+                    vb = -self.plant.psi_f * omega_e * math.sin(th - 2.0 * math.pi / 3.0)
+                    vc = -self.plant.psi_f * omega_e * math.sin(th + 2.0 * math.pi / 3.0)
             else:
                 va, vb, vc = duties_to_voltages(out.duty_a, out.duty_b, out.duty_c, vbus, ia, ib, ic)  # true currents -> dead-time polarity
             
@@ -164,8 +178,47 @@ class SILRunner:
                     self.controller.set_speed_ref(new_speed * (2*math.pi/60) * MOTOR_PARAMS['P'])
             
             for _ in range(sub_steps):
-                vd, vq = phase_to_dq(va, vb, vc, self.plant.theta_e)
-                self.plant.step(vd, vq, load, dt_p)
+                if not gate_en:
+                    omega_e = self.plant.omega_e
+                    e_ll_pk = math.sqrt(3.0) * self.plant.psi_f * abs(omega_e)
+                    if e_ll_pk > vbus:
+                        vd = 0.0
+                        vq = -math.copysign(vbus / math.sqrt(3.0), omega_e)
+                        self.plant.step(vd, vq, load, dt_p)
+                    else:
+                        i_mag = math.hypot(self.plant.i_d, self.plant.i_q)
+                        if i_mag > 0.02:
+                            # Inductor freewheeling quench through body diodes
+                            vd = -math.copysign(vbus / math.sqrt(3.0), self.plant.i_d) if abs(self.plant.i_d) > 0.005 else 0.0
+                            vq = -math.copysign(vbus / math.sqrt(3.0), self.plant.i_q) if abs(self.plant.i_q) > 0.005 else 0.0
+                            self.plant.step(vd, vq, load, dt_p)
+                            if (vd * self.plant.i_d > 0.0) or (vq * self.plant.i_q > 0.0):
+                                self.plant.i_d = 0.0
+                                self.plant.i_q = 0.0
+                                if hasattr(self.plant, 'i_a'):
+                                    self.plant.i_a = 0.0
+                                    self.plant.i_b = 0.0
+                                    self.plant.i_c = 0.0
+                        else:
+                            # Quenched: zero current, pure mechanical coasting
+                            self.plant.i_d = 0.0
+                            self.plant.i_q = 0.0
+                            if hasattr(self.plant, 'i_a'):
+                                self.plant.i_a = 0.0
+                                self.plant.i_b = 0.0
+                                self.plant.i_c = 0.0
+                            vd = 0.0
+                            vq = omega_e * self.plant.psi_f
+                            self.plant.step(vd, vq, load, dt_p)
+                            self.plant.i_d = 0.0
+                            self.plant.i_q = 0.0
+                            if hasattr(self.plant, 'i_a'):
+                                self.plant.i_a = 0.0
+                                self.plant.i_b = 0.0
+                                self.plant.i_c = 0.0
+                else:
+                    vd, vq = phase_to_dq(va, vb, vc, self.plant.theta_e)
+                    self.plant.step(vd, vq, load, dt_p)
                 
             # Log
             res.time[k] = t
