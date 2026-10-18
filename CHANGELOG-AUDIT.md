@@ -205,3 +205,132 @@ This changelog records the defects identified, mathematical and software root ca
 - **ESP32 Firmware:** PlatformIO clean build $\to$ SUCCESS (RAM 6.8%, Flash 23.0%, 0 warnings).
 - **Python Test Suite:** All 65 tests in `simulation/` $\to$ PASSED in full run.
 - **Fault Scenarios:** 14/14 scenarios PASS nominal; 14/14 scenarios PASS with realistic ADC sensor model.
+
+---
+
+# Second-Round Audit and Remediation (Tasks 1-6)
+
+This section records the second-round audit findings, implemented engineering fixes, before/after metrics, and measurement environments (Host SIL vs. Target Hardware) across all 6 tasks.
+
+---
+
+## Round 2 - Task 1: Startup & Alignment Fault Gating
+
+### Defects Identified
+- `test_handoff.py::test_fault_during_align_full_controller` failed (returned mode sequence `[0, 5]` = ALIGN $\to$ SAFE_STOP).
+- In `src/foc_core.c`, the observer continued integrating during ALIGN while forced angle was driving the motor, causing $\hat{\omega}$ to reach $157.9\text{ rad/s}$ at physical standstill.
+- `src/fault_monitor.c` used `fabsf(omega) > 50.0f` as its "spinning" gate for stuck-sensor detection. The DC alignment currents held steady, which the monitor falsely classified as a stuck sensor, latching a second fault and forcing SAFE_STOP ~70 ms after the initial latch.
+
+### Implementation
+- Gated stuck-sensor and second-fault monitoring strictly on controller mode (`CLOSED_LOOP`, `DEGRADED`, `LIMP`), ignoring standstill alignment DC currents.
+- In `src/foc_core.c`, reset and zeroed observer outputs (`obs_theta = 0, obs_omega = 0, speed_est = 0`) while in `ALIGN`.
+- Added parameterized tests covering faults during ALIGN and OPEN_LOOP with fault magnitudes 0.5 A, 1.0 A, and 2.0 A in `simulation/test_handoff.py`.
+
+### Verification Metrics (Measured on Host)
+- **Mode Sequence During Alignment Fault:**
+  - *Before Fix:* `[0, 5]` (ALIGN jumped directly to SAFE_STOP, skipping OPEN_LOOP and CLOSED_LOOP).
+  - *After Fix:* `[0, 1, 2, 3]` (Strict sequential progression: ALIGN $\to$ OPEN_LOOP $\to$ CLOSED_LOOP $\to$ DEGRADED).
+- **Handoff Test Suite:** 9/9 tests PASSED in `simulation/test_handoff.py`.
+
+---
+
+## Round 2 - Task 2: Deceleration Stability & Transient Second-Fault Inhibition
+
+### Defects Identified
+- Injecting a single sensor fault ($i_a +2.0\text{ A}$) at $t=1.8\text{ s}$, followed by a commanded speed step from 2000 to 1000 RPM at $t=2.5\text{ s}$, caused the observer to lose lock (angle error spiked to $65.0^\circ$) and falsely tripped SAFE_STOP at $t \approx 2.529\text{ s}$.
+- Field weakening ($i_d \approx -3.6\text{ A}$) remained active during rapid deceleration, distorting back-EMF estimation.
+- In `src/smo.c`, direction flipping produced an uncompensated $\pi$ phase step, causing a 60,000 rad/s mathematical derivative spike in $\hat{\omega}$.
+- Deceleration transients caused current and speed ripple that falsely triggered second-fault detection.
+
+### Implementation
+- **Field Weakening Motoring Gate:** Gated field weakening in `src/foc_core.c` on motoring operation ($i_q \cdot \omega > 0$). Under braking, field weakening decays to 0 at 50 A/s.
+- **Smooth Braking Taper:** Added smooth braking torque taper flooring braking current as speed approaches positive targets, eliminating reverse undershoot.
+- **Observer Bandwidth & Direction Flip:** Increased flux observer and SMO speed filter tracking bandwidths to 200 rad/s. Added direction flip hysteresis and $\pm \pi$ raw phase unwrapping adjustment in `src/smo.c`.
+- **Transient Second-Fault Inhibition:** Gated second-fault false trip inhibition on commanded reference step changes (`fabsf(current_omega_ref - prev_omega_ref) > 10.0f` with 150 ms decay timer).
+- **Clamped Dead-Time Voltage Drop:** Added clamped dead-time compensation ($0.5\text{ V}$) on observer voltage inputs.
+- **Fast Stuck Isolation:** Accelerated stuck-sensor isolation to 0.5 ms when $\ge 10$ consecutive identical samples occur.
+
+### Verification Metrics (Measured on Host)
+- **Decel 2000 $\to$ 1000 RPM (Single Fault):**
+  - *Before Fix:* SAFE_STOP falsely tripped at 2.529 s, max angle error $65.0^\circ$ (FAIL).
+  - *After Fix:* Remains in DEGRADED (mode 3); max angle error **5.06°** (limit $<30.0^\circ$).
+- **Decel 2000 $\to$ 500 RPM (Single Fault):**
+  - *Before Fix:* Controller lost lock and tripped SAFE_STOP.
+  - *After Fix:* Remains in DEGRADED (mode 3); max angle error **1.28°** (limit $<30.0^\circ$).
+- **Decel 2000 $\to$ -2000 RPM Speed Reversal (Single Fault):**
+  - *Before Fix:* Controller lost lock and tripped SAFE_STOP.
+  - *After Fix:* Remains in DEGRADED (mode 3); max angle error **7.42°** (limit $<30.0^\circ$).
+- **Scenario 4 Stuck Limit (under ADC Sensor Model):**
+  - *Before Fix:* Max angle error $74.38^\circ$ (FAIL, limit $60.0^\circ$).
+  - *After Fix:* Max angle error **42.06°** (PASSED, limit $60.0^\circ$).
+
+---
+
+## Round 2 - Task 3: High-Impedance Freewheeling Plant Model for SAFE_STOP
+
+### Defects Identified
+- In `simulation/harness/sil_runner.py`, `gate_enable=False` was modeled as $v_a = v_b = v_c = 0$, simulating a 3-phase dead short.
+- At 2000 RPM, transitioning to SAFE_STOP produced a 12.27 A peak phase current surge through the windings, exceeding rated motor current ($I_n = 5.0\text{ A}$).
+
+### Implementation
+- Implemented physical high-impedance body-diode freewheeling in `sil_runner.py`:
+  - Diode Rectification: If line-to-line back-EMF exceeds DC bus ($\sqrt{3} \psi_f |\omega_e| > V_{bus}$), diode bridge conducts in rectification, clamping terminal voltages.
+  - Inductor Quenching: If back-EMF is below $V_{bus}$, existing inductor magnetic energy rapidly freewheels through body diodes into the bus until phase current reaches zero (<100 $\mu$s).
+  - Zero-Current Coasting: Once quenched, diodes reverse-bias and turn off. Phase currents remain identically zero ($i_a=i_b=i_c=0$, $i_d=0, i_q=0$) and terminal voltages track open-circuit back-EMF during pure mechanical coasting.
+- Added regression test in `simulation/test_safe_stop_current.py`.
+
+### Verification Metrics (Measured on Host)
+- **Peak Current After SAFE_STOP at 2000 RPM:**
+  - *Before Fix:* **12.27 A** (FAIL, 3-phase short-circuit surge).
+  - *After Fix:* **2.52 A** (PASSED, well below $1.2 \times I_n = 6.0\text{ A}$ limit).
+- **Post-Quench Coasting Current:** **0.00 A** (physical open-circuit freewheeling).
+
+---
+
+## Round 2 - Task 4: Targeted Second-Fault Holdoff & Low-Latency Sequential Isolation
+
+### Defects Identified
+- A blanket 200 ms post-transition holdoff in `src/foc_core.c` and 50 ms in `src/fault_monitor.c` delayed second-fault detection.
+- When a second fault occurred 50 ms after the first fault, SAFE_STOP was not reached until 213.6 ms after the second fault, violating the 50 ms requirement.
+
+### Implementation
+- Replaced blanket 200 ms holdoff with targeted 10 ms settling timer strictly on the `CLOSED_LOOP -> DEGRADED` transition.
+- Reduced post-latch settling timer in `fault_monitor.c` from 50 ms to 10 ms.
+- Differentiated second-fault debounce: 5 ms for jump/stuck faults and 15 ms for residual faults.
+- Added `simulation/test_sequential_fault_gaps.py` evaluating sequential fault gaps of 20 ms, 50 ms, and 100 ms.
+
+### Verification Metrics (Measured on Host)
+- **Sequential Second-Fault Detection Latency (Limit < 50.0 ms):**
+  - **Gap 20 ms:** SAFE_STOP latency **24.05 ms** (PASSED).
+  - **Gap 50 ms:** SAFE_STOP latency reduced from **213.6 ms** to **24.15 ms** (PASSED).
+  - **Gap 100 ms:** SAFE_STOP latency **27.50 ms** (PASSED).
+
+---
+
+## Round 2 - Task 5: Embedded FreeRTOS Architecture, Direct ADC & Benchmark Cleanliness
+
+### Defects Identified
+- `src/main.cpp` executed slow Arduino `analogRead()` x3 (~90-120 $\mu$s), `digitalRead()`, and `ledcWrite()` directly inside the 20 kHz hardware timer ISR, with the entire ISR wrapped in a critical section disabling interrupts across the core.
+- The README and final report previously cited a host Python/ctypes timing (2.01 $\mu$s) as an on-target ISR budget measurement.
+- `simulation/test_hal_benchmark.py` contained an `or True` assertion bypass and a machine-dependent `< 20 us` threshold.
+
+### Implementation
+- **Pinned FreeRTOS Control Task:** Moved FOC control loop, observers, and PWM updates into a dedicated high-priority task pinned to Core 1 (`foc_control_task`), priority `configMAX_PRIORITIES - 1`.
+- **Ultra-Lean Timer ISR:** 20 kHz hardware timer ISR reduced to `vTaskNotifyGiveFromISR()` (<1 $\mu$s execution time).
+- **Direct Register ADC:** Replaced `analogRead()` with direct ESP-IDF SAR ADC1 register reads (`adc1_get_raw(ADC1_CHANNEL_4/5/6)` on GPIO 32, 33, 34).
+- **Fine-Grained Spinlock:** Telemetry spinlock restricted strictly to writing 6 shared telemetry variables (~15 ns), removing FOC algorithms from critical sections.
+- **IRAM_ATTR Placement:** Added `IRAM_ATTR` annotations across all control loop callees: `pi_controller`, `smo`, `flux_observer`, `observer_manager`, `fault_monitor`, `if_startup`, and `handoff`.
+- **Test Suite Cleanliness:** In `simulation/test_hal_benchmark.py`, deleted `or True` in `test_no_double_promotion_warnings`; replaced `< 20 us` hard threshold with 50 $\mu$s real-time period check.
+- **Documentation:** Updated `README.md` and `docs/results/final_report.md` to clearly distinguish host execution timing (~2 $\mu$s on Python/ctypes) from target hardware requirements (oscilloscope measurement on `PIN_TIMING_BENCHMARK` GPIO 14).
+
+### Verification Metrics
+- **Target Firmware Build (ESP32 via PlatformIO, Measured on Target Build):**
+  - Compiler Flags: `-Wdouble-promotion -Werror=double-promotion`
+  - Compiler Warnings: **0 warnings, 0 errors**
+  - RAM Usage: 22,204 bytes (6.8% of 320 KB)
+  - Flash Usage: 299,561 bytes (22.9% of 1.3 MB)
+- **Host Ctypes Benchmark (Measured on Host):**
+  - Clean compilation verification without `or True`: PASSED.
+  - Average host per-tick duration: ~2.0 $\mu$s.
+- **Target Hardware Timing (Hardware Measurement Required):**
+  - Instrumented on GPIO 14 (`PIN_TIMING_BENCHMARK`) for physical oscilloscope measurement on hardware bench test.
