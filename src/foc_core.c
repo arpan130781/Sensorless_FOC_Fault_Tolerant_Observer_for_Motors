@@ -29,6 +29,10 @@ static float speed_est = 0.0f;
 static int last_mode = ALIGN;
 static float last_applied_iq_ref = 0.0f;
 static float id_fw = 0.0f;
+static float prev_obs_omega = 0.0f;
+static float filtered_domega_dt = 0.0f;
+static float prev_omega_ref = 0.0f;
+static float ref_transient_timer = 0.0f;
 
 void foc_init(const MotorParams* m, const ControllerParams* c) {
     motor = *m;
@@ -58,6 +62,10 @@ void foc_reset(void) {
     last_mode = ALIGN;
     last_applied_iq_ref = 0.0f;
     id_fw = 0.0f;
+    prev_obs_omega = 0.0f;
+    filtered_domega_dt = 0.0f;
+    prev_omega_ref = 0.0f;
+    ref_transient_timer = 0.0f;
 }
 
 void foc_set_speed_ref(float omega_ref_rads) { current_omega_ref = omega_ref_rads; }
@@ -92,10 +100,19 @@ FocOutput foc_tick(const FocInput* input) {
 
     FocOutput out = {0};
     
+    // Transient inhibition check for second-fault false trips
+    if (fabsf(current_omega_ref - prev_omega_ref) > 10.0f) {
+        ref_transient_timer = 0.150f;
+        prev_omega_ref = current_omega_ref;
+    }
+    if (ref_transient_timer > 0.0f) {
+        ref_transient_timer -= dt_curr;
+    }
+    bool transient_inhibit = (ref_transient_timer > 0.0f);
+
     // Fault handling
-    
     float obs_theta = obs_mgr_get_theta(&obs_mgr);
-    FaultStatus fs = fault_update(&fault, input->i_a, input->i_b, input->i_c, prev_v_alpha, prev_v_beta, obs_theta, speed_est, last_mode, dt_curr);
+    FaultStatus fs = fault_update(&fault, input->i_a, input->i_b, input->i_c, prev_v_alpha, prev_v_beta, obs_theta, speed_est, last_mode, transient_inhibit, dt_curr);
 
     float ia = fs.i_a_rec;
     float ib = fs.i_b_rec;
@@ -169,14 +186,42 @@ FocOutput foc_tick(const FocInput* input) {
             pi_spd.kp = ctrl.spd_kp * spd_scale;
             pi_spd.ki = ctrl.spd_ki * (spd_scale * spd_scale);
 
-            current_iq_ref = pi_update(&pi_spd, err, dt_spd);
-            
-            if (mode == DEGRADED) {
-                if (current_iq_ref > motor.In * 0.8f) current_iq_ref = motor.In * 0.8f;
-                if (current_iq_ref < -motor.In * 0.8f) current_iq_ref = -motor.In * 0.8f;
-            } else if (mode == LIMP) {
-                if (current_iq_ref > motor.In * 0.4f) current_iq_ref = motor.In * 0.4f;
-                if (current_iq_ref < -motor.In * 0.4f) current_iq_ref = -motor.In * 0.4f;
+            float iq_limit = motor.In;
+            if (mode == DEGRADED) iq_limit = 0.8f * motor.In;
+            else if (mode == LIMP) iq_limit = 0.4f * motor.In;
+            pi_spd.output_max = iq_limit;
+            pi_spd.output_min = -iq_limit;
+
+            float iq_raw = pi_update(&pi_spd, err, dt_spd);
+            if (iq_raw > iq_limit) {
+                current_iq_ref = iq_limit;
+                pi_back_calculate(&pi_spd, iq_limit, err);
+            } else if (iq_raw < -iq_limit) {
+                current_iq_ref = -iq_limit;
+                pi_back_calculate(&pi_spd, -iq_limit, err);
+            } else {
+                current_iq_ref = iq_raw;
+            }
+
+            // Smooth braking taper: prevent decelerating transient from driving motor past target into reverse
+            if (current_omega_ref > 0.0f) {
+                float min_braking_iq = -iq_limit;
+                if (obs_omega < 0.5f * current_omega_ref) {
+                    min_braking_iq = 0.0f;
+                } else if (obs_omega < current_omega_ref) {
+                    float ratio = (obs_omega - 0.5f * current_omega_ref) / (0.5f * current_omega_ref);
+                    min_braking_iq = -iq_limit * ratio;
+                }
+                if (current_iq_ref < min_braking_iq) current_iq_ref = min_braking_iq;
+            } else if (current_omega_ref < 0.0f) {
+                float max_braking_iq = iq_limit;
+                if (obs_omega > 0.5f * current_omega_ref) {
+                    max_braking_iq = 0.0f;
+                } else if (obs_omega > current_omega_ref) {
+                    float ratio = (obs_omega - 0.5f * current_omega_ref) / (0.5f * current_omega_ref);
+                    max_braking_iq = iq_limit * ratio;
+                }
+                if (current_iq_ref > max_braking_iq) current_iq_ref = max_braking_iq;
             }
         }
     }
@@ -223,7 +268,8 @@ FocOutput foc_tick(const FocInput* input) {
     float v_mag = sqrtf(vd_raw * vd_raw + vq_raw * vq_raw);
     float v_fw_thresh = 0.88f * v_max;
     float spd_rpm_est = fabsf(obs_omega) * (60.0f / (2.0f * (float)M_PI * (float)motor.P));
-    if (spd_rpm_est > 1200.0f && (mode == CLOSED_LOOP || mode == DEGRADED || mode == LIMP)) {
+    bool is_motoring = (current_iq_ref * obs_omega > 0.0f);
+    if (spd_rpm_est > 1200.0f && is_motoring && (mode == CLOSED_LOOP || mode == DEGRADED || mode == LIMP)) {
         if (v_mag > v_fw_thresh) {
             id_fw -= 25.0f * (v_mag - v_fw_thresh) * dt_curr;
         } else if (v_mag < 0.80f * v_max && id_fw < 0.0f) {
@@ -233,9 +279,9 @@ FocOutput foc_tick(const FocInput* input) {
         float id_min = -0.6f * motor.In;
         if (id_fw < id_min) id_fw = id_min;
     } else {
-        // At low speeds / zero-crossing, decay field weakening to 0 for observer stability
+        // At low speeds / zero-crossing or under braking, decay field weakening to 0 for observer stability
         if (id_fw < 0.0f) {
-            id_fw += 25.0f * dt_curr;
+            id_fw += 50.0f * dt_curr;
             if (id_fw > 0.0f) id_fw = 0.0f;
         }
     }
@@ -263,14 +309,20 @@ FocOutput foc_tick(const FocInput* input) {
     float valpha, vbeta;
     inv_park_transform(vd, vq, angle, &valpha, &vbeta);
     
-    // Observers receive the limited voltages that the inverter can apply
-    prev_v_alpha = valpha;
-    prev_v_beta = vbeta;
-    
-    // SVM
+    // Inv Clarke
     float va, vb, vc;
     inv_clarke_transform(valpha, vbeta, &va, &vb, &vc);
-    
+
+    // Observers receive the actual applied voltages including dead-time distortion (0.5 V)
+    float ia_c = fminf(motor.In, fmaxf(-motor.In, ia));
+    float ib_c = fminf(motor.In, fmaxf(-motor.In, ib));
+    float ic_c = fminf(motor.In, fmaxf(-motor.In, ic));
+    float va_app = va - (ia_c > 0.05f ? 0.5f : (ia_c < -0.05f ? -0.5f : 0.0f));
+    float vb_app = vb - (ib_c > 0.05f ? 0.5f : (ib_c < -0.05f ? -0.5f : 0.0f));
+    float vc_app = vc - (ic_c > 0.05f ? 0.5f : (ic_c < -0.05f ? -0.5f : 0.0f));
+    float v_neut = (va_app + vb_app + vc_app) / 3.0f;
+    clarke_transform(va_app - v_neut, vb_app - v_neut, vc_app - v_neut, &prev_v_alpha, &prev_v_beta);
+
     float vmin = fminf(va, fminf(vb, vc));
     float vmax = fmaxf(va, fmaxf(vb, vc));
     float vcom = -0.5f * (vmax + vmin);

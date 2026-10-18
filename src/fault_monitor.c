@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 #define KCL_THRESH 0.3f
-#define KCL_CONSECUTIVE_EXCEED_LIMIT 5  /* Require 5 consecutive exceedances (250 us @ 20 kHz) */
+#define KCL_CONSECUTIVE_EXCEED_LIMIT 2  /* Require 2 consecutive exceedances (100 us @ 20 kHz) to reject single-sample spikes */
 #define ISOLATION_WINDOW 0.001f   /* 1 ms accumulation window */
 #define RECOVERY_WINDOW 0.500f   /* 500 ms sustained healthy before clearing */
 
@@ -41,7 +41,7 @@ void fault_reset(FaultMonitor* fm) {
 FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                          float v_alpha, float v_beta,
                          float theta, float omega,
-                         int controller_mode, float dt)
+                         int controller_mode, bool transient_inhibit, float dt)
 {
     /* ---- Step / onset changes from previous healthy sample ---- */
     float dia = fabsf(i_a - fm->prev_i_a);
@@ -126,10 +126,12 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
         float da = i_alpha_rec - fm->i_alpha_pred;
         float db = i_beta_rec - fm->i_beta_pred;
         float r_pred = sqrtf(da * da + db * db);
-        if (r_pred < 1.0f) {
-            fm->i_alpha_pred += 2000.0f * dt * da;
-            fm->i_beta_pred  += 2000.0f * dt * db;
+        float gain = 2000.0f;
+        if (r_pred > 1.0f) {
+            gain = 2000.0f / r_pred;
         }
+        fm->i_alpha_pred += gain * dt * da;
+        fm->i_beta_pred  += gain * dt * db;
     }
 
     /* ---- Clear fault-status flags for this tick ---- */
@@ -270,8 +272,8 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
             fm->err_acc_C += err_C * dt;
             fm->err_acc_Amb += err_Amb * dt;
             fm->E_acc += fabsf(E) * dt;
-
-            if (fm->fault_isolation_timer >= ISOLATION_WINDOW) {
+            float iso_win = (fm->stuck_count_a >= 10 || fm->stuck_count_b >= 10 || fm->stuck_count_c >= 10) ? 0.0005f : ISOLATION_WINDOW;
+            if (fm->fault_isolation_timer >= iso_win) {
                 float eA = fm->err_acc_A;
                 float eB = fm->err_acc_B;
                 float eC = fm->err_acc_C;
@@ -361,54 +363,58 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
 
     /* Monitor remaining healthy channels for a second sensor fault when 1 channel is already degraded */
     if (num_latched == 1 && !fm->safe_stop_latched && fm->post_latch_settling_timer <= 0.0f && is_closed_mode) {
-        float ia_v = fm->fault_latch_a ? -(i_b + i_c) : i_a;
-        float ib_v = fm->fault_latch_b ? -(i_a + i_c) : i_b;
-        float ic_v = fm->fault_latch_c ? -(i_a + i_b) : i_c;
-        float i_alpha_rec = (2.0f/3.0f) * (ia_v - 0.5f*ib_v - 0.5f*ic_v);
-        float i_beta_rec  = 0.57735027f * (ib_v - ic_v);
-        float da = i_alpha_rec - fm->i_alpha_pred;
-        float db = i_beta_rec - fm->i_beta_pred;
-        float r_pred = sqrtf(da * da + db * db);
-
-        bool second_fault = false;
-        int second_channel = -1;
-
-        if (fm->fault_latch_a) {
-            bool stuck = (fm->stuck_count_b >= 10 || fm->stuck_count_c >= 10);
-            bool jump = (dib > 1.0f || dic > 1.0f);
-            bool res_bad = (r_pred > 1.2f);
-            if (stuck || jump || res_bad) {
-                second_fault = true;
-                second_channel = (fm->stuck_count_b >= 10 || dib > 1.0f) ? 1 : 2;
-            }
-        } else if (fm->fault_latch_b) {
-            bool stuck = (fm->stuck_count_a >= 10 || fm->stuck_count_c >= 10);
-            bool jump = (dia > 1.0f || dic > 1.0f);
-            bool res_bad = (r_pred > 1.2f);
-            if (stuck || jump || res_bad) {
-                second_fault = true;
-                second_channel = (fm->stuck_count_a >= 10 || dia > 1.0f) ? 0 : 2;
-            }
-        } else if (fm->fault_latch_c) {
-            bool stuck = (fm->stuck_count_a >= 10 || fm->stuck_count_b >= 10);
-            bool jump = (dia > 1.0f || dib > 1.0f);
-            bool res_bad = (r_pred > 1.2f);
-            if (stuck || jump || res_bad) {
-                second_fault = true;
-                second_channel = (fm->stuck_count_a >= 10 || dia > 1.0f) ? 0 : 1;
-            }
-        }
-
-        if (second_fault) {
-            fm->second_fault_timer += dt;
-            if (fm->second_fault_timer >= 0.020f) {
-                if (second_channel == 0) fm->fault_latch_a = true;
-                else if (second_channel == 1) fm->fault_latch_b = true;
-                else fm->fault_latch_c = true;
-                fm->safe_stop_latched = true;
-            }
-        } else {
+        if (transient_inhibit) {
             fm->second_fault_timer = 0.0f;
+        } else {
+            float ia_v = fm->fault_latch_a ? -(i_b + i_c) : i_a;
+            float ib_v = fm->fault_latch_b ? -(i_a + i_c) : i_b;
+            float ic_v = fm->fault_latch_c ? -(i_a + i_b) : i_c;
+            float i_alpha_rec = (2.0f/3.0f) * (ia_v - 0.5f*ib_v - 0.5f*ic_v);
+            float i_beta_rec  = 0.57735027f * (ib_v - ic_v);
+            float da = i_alpha_rec - fm->i_alpha_pred;
+            float db = i_beta_rec - fm->i_beta_pred;
+            float r_pred = sqrtf(da * da + db * db);
+
+            bool second_fault = false;
+            int second_channel = -1;
+
+            if (fm->fault_latch_a) {
+                bool stuck = (fm->stuck_count_b >= 10 || fm->stuck_count_c >= 10);
+                bool jump = (dib > 1.0f || dic > 1.0f);
+                bool res_bad = (r_pred > 1.2f);
+                if (stuck || jump || res_bad) {
+                    second_fault = true;
+                    second_channel = (fm->stuck_count_b >= 10 || dib > 1.0f) ? 1 : 2;
+                }
+            } else if (fm->fault_latch_b) {
+                bool stuck = (fm->stuck_count_a >= 10 || fm->stuck_count_c >= 10);
+                bool jump = (dia > 1.0f || dic > 1.0f);
+                bool res_bad = (r_pred > 1.2f);
+                if (stuck || jump || res_bad) {
+                    second_fault = true;
+                    second_channel = (fm->stuck_count_a >= 10 || dia > 1.0f) ? 0 : 2;
+                }
+            } else if (fm->fault_latch_c) {
+                bool stuck = (fm->stuck_count_a >= 10 || fm->stuck_count_b >= 10);
+                bool jump = (dia > 1.0f || dib > 1.0f);
+                bool res_bad = (r_pred > 1.2f);
+                if (stuck || jump || res_bad) {
+                    second_fault = true;
+                    second_channel = (fm->stuck_count_a >= 10 || dia > 1.0f) ? 0 : 1;
+                }
+            }
+
+            if (second_fault) {
+                fm->second_fault_timer += dt;
+                if (fm->second_fault_timer >= 0.020f) {
+                    if (second_channel == 0) fm->fault_latch_a = true;
+                    else if (second_channel == 1) fm->fault_latch_b = true;
+                    else fm->fault_latch_c = true;
+                    fm->safe_stop_latched = true;
+                }
+            } else {
+                fm->second_fault_timer = 0.0f;
+            }
         }
     }
 

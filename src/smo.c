@@ -37,10 +37,16 @@ void smo_update(SMO* smo, float v_alpha, float v_beta, float i_alpha, float i_be
     smo->emf_beta  += smo->lpf_gain * dt * (z_beta  - smo->emf_beta);
     
     // Direction tracking with hysteresis to prevent low-speed chattering/flips
-    if (smo->omega_hat > 25.0f) {
+    float prev_dir = smo->dir;
+    if (smo->omega_hat > 5.0f) {
         smo->dir = 1.0f;
-    } else if (smo->omega_hat < -25.0f) {
+    } else if (smo->omega_hat < -5.0f) {
         smo->dir = -1.0f;
+    }
+    if (smo->dir != prev_dir) {
+        smo->prev_theta_raw += (smo->dir > 0.0f) ? -(float)M_PI : (float)M_PI;
+        if (smo->prev_theta_raw > (float)M_PI)  smo->prev_theta_raw -= 2.0f * (float)M_PI;
+        if (smo->prev_theta_raw < -(float)M_PI) smo->prev_theta_raw += 2.0f * (float)M_PI;
     }
     
     // Angle estimation (Note PMSM convention)

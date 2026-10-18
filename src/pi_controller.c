@@ -1,4 +1,5 @@
 #include "pi_controller.h"
+#include <stdbool.h>
 
 void pi_init(PIController* pi, float kp, float ki, float min, float max) {
     pi->kp = kp; pi->ki = ki;
@@ -11,14 +12,16 @@ void pi_reset(PIController* pi) {
 }
 
 float pi_update(PIController* pi, float error, float dt) {
-    pi->integral += error * pi->ki * dt;
-    
-    // Anti-windup
-    if (pi->integral > pi->output_max) pi->integral = pi->output_max;
-    if (pi->integral < pi->output_min) pi->integral = pi->output_min;
+    float unsat = (error * pi->kp) + pi->integral;
+    bool sat_high = (unsat >= pi->output_max && error > 0.0f);
+    bool sat_low  = (unsat <= pi->output_min && error < 0.0f);
+    if (!sat_high && !sat_low) {
+        pi->integral += error * pi->ki * dt;
+        if (pi->integral > pi->output_max) pi->integral = pi->output_max;
+        if (pi->integral < pi->output_min) pi->integral = pi->output_min;
+    }
     
     pi->output = (error * pi->kp) + pi->integral;
-    
     if (pi->output > pi->output_max) pi->output = pi->output_max;
     if (pi->output < pi->output_min) pi->output = pi->output_min;
     

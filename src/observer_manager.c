@@ -34,9 +34,12 @@ void obs_mgr_update(ObserverManager* mgr, float v_alpha, float v_beta, float i_a
     mgr->disagreement = fabsf(diff);
     mgr->emf_mag = smo_get_emf_magnitude(&mgr->smo);
     
-    // Evaluate health separately
+    // Evaluate health separately: SMO needs sufficient back-EMF to reliably isolate angle
     mgr->smo_health = 1.0f;
-    if (mgr->emf_mag < 0.05f) mgr->smo_health = 0.5f;
+    if (mgr->emf_mag < 1.0f) {
+        float ratio = fmaxf(0.0f, mgr->emf_mag / 1.0f);
+        mgr->smo_health = ratio * ratio;
+    }
     
     mgr->flux_health = 1.0f;
     if (fabsf(omega_est) < 10.0f) mgr->flux_health = 0.5f;
@@ -66,8 +69,8 @@ float obs_mgr_get_theta(ObserverManager* mgr) {
     float theta_smo = smo_get_theta(&mgr->smo);
     float theta_flux = flux_obs_get_theta(&mgr->flux);
     
-    if (mgr->confidence_smo > mgr->confidence_flux * 1.5f) return theta_smo;
-    if (mgr->confidence_flux > mgr->confidence_smo * 1.5f) return theta_flux;
+    if (mgr->confidence_smo > mgr->confidence_flux * 1.2f) return theta_smo;
+    if (mgr->confidence_flux > mgr->confidence_smo * 1.2f) return theta_flux;
     
     float w_smo = mgr->confidence_smo / (mgr->confidence_smo + mgr->confidence_flux + 1e-6f);
     float w_flux = 1.0f - w_smo;
@@ -81,8 +84,8 @@ float obs_mgr_get_omega(ObserverManager* mgr) {
     if (mgr->observer_select == 1) return smo_get_omega(&mgr->smo);
     if (mgr->observer_select == 2) return flux_obs_get_omega(&mgr->flux);
     
-    if (mgr->confidence_smo > mgr->confidence_flux * 1.5f) return smo_get_omega(&mgr->smo);
-    if (mgr->confidence_flux > mgr->confidence_smo * 1.5f) return flux_obs_get_omega(&mgr->flux);
+    if (mgr->confidence_smo > mgr->confidence_flux * 1.2f) return smo_get_omega(&mgr->smo);
+    if (mgr->confidence_flux > mgr->confidence_smo * 1.2f) return flux_obs_get_omega(&mgr->flux);
     
     float w_smo = mgr->confidence_smo / (mgr->confidence_smo + mgr->confidence_flux + 1e-6f);
     float w_flux = 1.0f - w_smo;

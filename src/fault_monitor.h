@@ -45,4 +45,4 @@ typedef struct {
 
 void fault_init(FaultMonitor* fm, float Rs, float Ls, float psi_f);
 void fault_reset(FaultMonitor* fm);
-FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c, float v_alpha, float v_beta, float theta, float omega, int controller_mode, float dt);
+FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c, float v_alpha, float v_beta, float theta, float omega, int controller_mode, bool transient_inhibit, float dt);

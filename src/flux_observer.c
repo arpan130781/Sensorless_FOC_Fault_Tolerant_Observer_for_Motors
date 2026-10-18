@@ -36,7 +36,7 @@ void flux_obs_update(FluxObserver* obs, float v_alpha, float v_beta, float i_alp
     float dtheta = obs->theta_hat - obs->prev_theta;
     if (dtheta > (float)M_PI)  dtheta -= 2.0f * (float)M_PI;
     if (dtheta < -(float)M_PI) dtheta += 2.0f * (float)M_PI;
-    obs->omega_hat += 50.0f * dt * ((dtheta / dt) - obs->omega_hat);
+    obs->omega_hat += 200.0f * dt * ((dtheta / dt) - obs->omega_hat);
     
     obs->prev_theta = obs->theta_hat;
 }
