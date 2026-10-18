@@ -341,7 +341,7 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                         else if (fm->best_channel == 1) fm->fault_latch_b = true;
                         else fm->fault_latch_c = true;
                         fm->ambiguous_fault = false;
-                        fm->post_latch_settling_timer = 0.050f;
+                        fm->post_latch_settling_timer = 0.010f;
                     } else if (fm->unresolved_fault_timer > 0.015f) {
                         /* After 15ms without confident single isolation -> ambiguous */
                         fm->ambiguous_fault = true;
@@ -377,6 +377,7 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
 
             bool second_fault = false;
             int second_channel = -1;
+            bool is_jump_or_stuck = false;
 
             if (fm->fault_latch_a) {
                 bool stuck = (fm->stuck_count_b >= 10 || fm->stuck_count_c >= 10);
@@ -384,6 +385,7 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                 bool res_bad = (r_pred > 1.2f);
                 if (stuck || jump || res_bad) {
                     second_fault = true;
+                    is_jump_or_stuck = (stuck || jump);
                     second_channel = (fm->stuck_count_b >= 10 || dib > 1.0f) ? 1 : 2;
                 }
             } else if (fm->fault_latch_b) {
@@ -392,6 +394,7 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                 bool res_bad = (r_pred > 1.2f);
                 if (stuck || jump || res_bad) {
                     second_fault = true;
+                    is_jump_or_stuck = (stuck || jump);
                     second_channel = (fm->stuck_count_a >= 10 || dia > 1.0f) ? 0 : 2;
                 }
             } else if (fm->fault_latch_c) {
@@ -400,13 +403,15 @@ FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                 bool res_bad = (r_pred > 1.2f);
                 if (stuck || jump || res_bad) {
                     second_fault = true;
+                    is_jump_or_stuck = (stuck || jump);
                     second_channel = (fm->stuck_count_a >= 10 || dia > 1.0f) ? 0 : 1;
                 }
             }
 
             if (second_fault) {
                 fm->second_fault_timer += dt;
-                if (fm->second_fault_timer >= 0.020f) {
+                float required_time = is_jump_or_stuck ? 0.005f : 0.015f;
+                if (fm->second_fault_timer >= required_time) {
                     if (second_channel == 0) fm->fault_latch_a = true;
                     else if (second_channel == 1) fm->fault_latch_b = true;
                     else fm->fault_latch_c = true;

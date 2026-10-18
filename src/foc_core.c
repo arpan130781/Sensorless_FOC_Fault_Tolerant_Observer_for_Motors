@@ -165,8 +165,10 @@ FocOutput foc_tick(const FocInput* input) {
             speed_est = 0.0f;
         }
 
-        // Allow settling window on any mode transition before second fault monitoring
-        fault.post_latch_settling_timer = 0.200f;
+        // Targeted settling window: only on transition to DEGRADED mode
+        if (mode == DEGRADED && last_mode == CLOSED_LOOP) {
+            fault.post_latch_settling_timer = 0.010f;
+        }
         fault.second_fault_timer = 0.0f;
 
         last_mode = mode;
