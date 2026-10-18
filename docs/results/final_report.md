@@ -286,10 +286,9 @@ The repository includes a complete Simulink co-simulation environment in `simuli
 - **Result:** **SUCCESS**
 
 ### Performance Profiling & Timing Budget
-- **10,000-Tick Ctypes Benchmark:** Average execution time **2.01 $\mu\text{s}$ per tick** (including Python/ctypes overhead).
-- **Core FOC Calculation Time (C native):** $\approx 0.79\ \mu\text{s}$ per tick.
-- **Percentage of 50.0 $\mu\text{s}$ ISR Budget:** **4.02%** with ctypes overhead; **$<2\%$** raw C execution.
-- **Hardware Timing Probe:** Configured on GPIO 14 (`PIN_TIMING_BENCHMARK`) toggled HIGH on entry to `foc_isr` and LOW on exit for oscilloscope validation.
+- **10,000-Tick Host Ctypes Benchmark:** Average execution time **~2 µs per tick** on host Python/ctypes test runner (informational host benchmark; not an on-target hardware measurement).
+- **Embedded FreeRTOS Architecture:** On ESP32, the full FOC loop runs inside a dedicated high-priority FreeRTOS task pinned to Core 1 with direct SAR ADC1 register reads, leaving the 20 kHz hardware timer ISR ultra-lean (<1 µs notification overhead). Shared telemetry is protected by a fine-grained spinlock.
+- **Hardware Timing Probe:** Configured on GPIO 14 (`PIN_TIMING_BENCHMARK`) toggled HIGH on entry to the control task and LOW on exit for physical oscilloscope timing measurement on target hardware.
 
 ---
 

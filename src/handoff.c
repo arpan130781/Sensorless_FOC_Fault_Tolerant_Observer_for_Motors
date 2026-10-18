@@ -16,7 +16,7 @@ void handoff_reset(Handoff* h) {
     h->pending_fault_state = CLOSED_LOOP;
 }
 
-int handoff_update(Handoff* h, float obs_health, float obs_disagree, float obs_omega, bool startup_done, int fault_degradation_state, float dt) {
+IRAM_ATTR int handoff_update(Handoff* h, float obs_health, float obs_disagree, float obs_omega, bool startup_done, int fault_degradation_state, float dt) {
     h->time_in_state += dt;
     
     // Save LKG when healthy

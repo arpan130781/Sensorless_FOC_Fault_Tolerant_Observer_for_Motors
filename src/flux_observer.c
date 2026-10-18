@@ -14,7 +14,7 @@ void flux_obs_reset(FluxObserver* obs) {
     obs->prev_theta = 0.0f;
 }
 
-void flux_obs_update(FluxObserver* obs, float v_alpha, float v_beta, float i_alpha, float i_beta, float omega_hat, float dt) {
+IRAM_ATTR void flux_obs_update(FluxObserver* obs, float v_alpha, float v_beta, float i_alpha, float i_beta, float omega_hat, float dt) {
     (void)omega_hat;
     // Current model reference
     float flux_alpha_i = obs->psi_f * cosf(obs->theta_hat) + obs->Ls * i_alpha;
@@ -41,5 +41,5 @@ void flux_obs_update(FluxObserver* obs, float v_alpha, float v_beta, float i_alp
     obs->prev_theta = obs->theta_hat;
 }
 
-float flux_obs_get_theta(const FluxObserver* obs) { return obs->theta_hat; }
-float flux_obs_get_omega(const FluxObserver* obs) { return obs->omega_hat; }
+IRAM_ATTR float flux_obs_get_theta(const FluxObserver* obs) { return obs->theta_hat; }
+IRAM_ATTR float flux_obs_get_omega(const FluxObserver* obs) { return obs->omega_hat; }

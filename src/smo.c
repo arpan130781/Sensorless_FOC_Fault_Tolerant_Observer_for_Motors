@@ -22,7 +22,7 @@ void smo_reset(SMO* smo) {
     smo->dir = 1.0f;
 }
 
-void smo_update(SMO* smo, float v_alpha, float v_beta, float i_alpha, float i_beta, float dt) {
+IRAM_ATTR void smo_update(SMO* smo, float v_alpha, float v_beta, float i_alpha, float i_beta, float dt) {
     float err_alpha = smo->i_alpha_hat - i_alpha;
     float err_beta  = smo->i_beta_hat - i_beta;
     
@@ -75,6 +75,6 @@ void smo_update(SMO* smo, float v_alpha, float v_beta, float i_alpha, float i_be
     smo->prev_theta = smo->theta_hat;
 }
 
-float smo_get_theta(const SMO* smo) { return smo->theta_hat; }
-float smo_get_omega(const SMO* smo) { return smo->omega_hat; }
-float smo_get_emf_magnitude(const SMO* smo) { return sqrtf(smo->emf_alpha * smo->emf_alpha + smo->emf_beta * smo->emf_beta); }
+IRAM_ATTR float smo_get_theta(const SMO* smo) { return smo->theta_hat; }
+IRAM_ATTR float smo_get_omega(const SMO* smo) { return smo->omega_hat; }
+IRAM_ATTR float smo_get_emf_magnitude(const SMO* smo) { return sqrtf(smo->emf_alpha * smo->emf_alpha + smo->emf_beta * smo->emf_beta); }

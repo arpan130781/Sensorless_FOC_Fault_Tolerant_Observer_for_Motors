@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include "foc_api.h"
 
 typedef struct {
     int current_mode;
@@ -13,4 +14,4 @@ typedef struct {
 
 void handoff_init(Handoff* h);
 void handoff_reset(Handoff* h);
-int handoff_update(Handoff* h, float obs_health, float obs_disagree, float obs_omega, bool startup_done, int fault_degradation_state, float dt);
+IRAM_ATTR int handoff_update(Handoff* h, float obs_health, float obs_disagree, float obs_omega, bool startup_done, int fault_degradation_state, float dt);

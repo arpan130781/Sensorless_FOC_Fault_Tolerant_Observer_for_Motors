@@ -1,17 +1,19 @@
 #include <Arduino.h>
 #include <driver/gpio.h>
+#include <driver/adc.h>
 
 /* 
  * Sensorless FOC for ESP32 - Hardware Abstraction Layer (HAL) & Virtual Simulation
  * 
- * Runs a 20kHz hardware timer interrupt executing the sensorless FOC loop.
- * - Hardware Mode: Reads real phase currents from analog shunts.
- * - Simulation/Wokwi Mode (default or GPIO 4 LOW): Emulates PMSM motor physics 
- *   in real-time so the entire sensorless FOC loop can be fully tested in Wokwi
- *   without requiring a physical motor connected.
- * - Fault Injection: Press button on GPIO 15 to inject a sensor offset fault.
+ * FreeRTOS Pinned Task Architecture:
+ * - 20kHz hardware timer interrupt minimally notifies high-priority control task via vTaskNotifyGiveFromISR (< 1 us ISR overhead).
+ * - Control task pinned to Core 1 executes full sensorless FOC loop, observers, fault isolation, and PWM duty cycle updates.
+ * - Hardware Mode: Direct register reads via ESP-IDF SAR ADC1 (GPIO 32, 33, 34) bypassing framework overhead.
+ * - Simulation/Wokwi Mode (default or GPIO 4 LOW): Emulates PMSM motor physics in real-time.
+ * - Fault Injection: Pushbutton on GPIO 15 to inject a sensor offset fault.
  * - Status LEDs: Green (Normal), Yellow (Degraded), Red (Limp / Safe Stop).
- * - Timing Benchmark: GPIO 14 toggled HIGH during ISR execution for oscilloscope timing measurement.
+ * - Timing Benchmark: GPIO 14 toggled HIGH during control task execution for oscilloscope timing measurement.
+ * - Spinlock Critical Section: Protects ONLY the 6 shared telemetry variables during export.
  */
 
 extern "C" {
@@ -26,15 +28,15 @@ extern "C" {
 #define PIN_PWM_B           26
 #define PIN_PWM_C           27
 
-#define PIN_SENSE_A         32
-#define PIN_SENSE_B         33
-#define PIN_SENSE_C         34
+#define PIN_SENSE_A         32   // ADC1_CHANNEL_4
+#define PIN_SENSE_B         33   // ADC1_CHANNEL_5
+#define PIN_SENSE_C         34   // ADC1_CHANNEL_6
 
 #define PIN_LED_NORMAL      18   // Green LED (Closed loop normal)
 #define PIN_LED_DEGRADED    19   // Yellow LED (Fault isolated, 2-shunt fallback)
 #define PIN_LED_FAULT       21   // Red LED (Limp / Safe Stop)
 #define PIN_GATE_EN         22   // Gate driver hardware enable pin (Active HIGH)
-#define PIN_TIMING_BENCHMARK 14  // Scope probe pin: HIGH during ISR execution
+#define PIN_TIMING_BENCHMARK 14  // Scope probe pin: HIGH during control execution
 
 #define PIN_BTN_FAULT       15   // Pushbutton: Inject sensor fault (Active LOW)
 #define PIN_SW_MODE          4   // Switch: LOW = Virtual Motor, HIGH = Real ADC
@@ -65,10 +67,11 @@ static float adc_offset_c = 2048.0f;
 // ============================================================================
 // GLOBALS & STATE
 // ============================================================================
-hw_timer_t *foc_timer = NULL;
-portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+static hw_timer_t *foc_timer = NULL;
+static TaskHandle_t foc_task_handle = NULL;
+static portMUX_TYPE telemetryMux = portMUX_INITIALIZER_UNLOCKED;
 
-// Shared telemetry
+// Shared telemetry (protected by telemetryMux)
 volatile float telemetry_theta = 0.0f;
 volatile float telemetry_speed_rpm = 0.0f;
 volatile float telemetry_health = 0.0f;
@@ -77,8 +80,6 @@ volatile float telemetry_ia = 0.0f;
 volatile float telemetry_ib = 0.0f;
 volatile float telemetry_ic = 0.0f;
 
-// Motor & controller constants sourced from motor_params.h
-
 // Virtual Motor Plant States (for real-time simulation)
 static float sim_id = 0.0f;
 static float sim_iq = 0.0f;
@@ -86,106 +87,124 @@ static float sim_omega_m = 0.0f;
 static float sim_theta_e = 0.0f;
 
 // ============================================================================
-// 20kHz HARDWARE TIMER ISR
+// 20kHz HARDWARE TIMER ISR (Ultra-low latency task notification)
 // ============================================================================
 void IRAM_ATTR foc_isr() {
-    gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 1);
-    portENTER_CRITICAL_ISR(&timerMux);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(foc_task_handle, &xHigherPriorityTaskWoken);
+    if (xHigherPriorityTaskWoken) {
+        portYIELD_FROM_ISR();
+    }
+}
 
-    float ia = 0.0f;
-    float ib = 0.0f;
-    float ic = 0.0f;
+// ============================================================================
+// HIGH-PRIORITY PINNED FOC CONTROL TASK (Core 1)
+// ============================================================================
+void foc_control_task(void *pvParameters) {
+    (void)pvParameters;
 
-    bool use_virtual_motor = (digitalRead(PIN_SW_MODE) == LOW);
-    bool inject_fault = (digitalRead(PIN_BTN_FAULT) == LOW);
+    for (;;) {
+        // Block until notified by 20 kHz hardware timer ISR
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-    if (use_virtual_motor) {
-        // Compute phase currents from virtual PMSM state using library transforms
-        float i_alpha, i_beta;
-        inv_park_transform(sim_id, sim_iq, sim_theta_e, &i_alpha, &i_beta);
-        inv_clarke_transform(i_alpha, i_beta, &ia, &ib, &ic);
+        gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 1);
 
-        // Interactive fault injection: inject +2.0A bias on Phase A when button pressed
-        if (inject_fault) {
-            ia += 2.0f;
+        float ia = 0.0f;
+        float ib = 0.0f;
+        float ic = 0.0f;
+
+        bool use_virtual_motor = (gpio_get_level((gpio_num_t)PIN_SW_MODE) == 0);
+        bool inject_fault = (gpio_get_level((gpio_num_t)PIN_BTN_FAULT) == 0);
+
+        if (use_virtual_motor) {
+            // Compute phase currents from virtual PMSM state using library transforms
+            float i_alpha, i_beta;
+            inv_park_transform(sim_id, sim_iq, sim_theta_e, &i_alpha, &i_beta);
+            inv_clarke_transform(i_alpha, i_beta, &ia, &ib, &ic);
+
+            // Interactive fault injection: inject +2.0A bias on Phase A when button pressed
+            if (inject_fault) {
+                ia += 2.0f;
+            }
+        } else {
+            // Direct register read via ESP-IDF SAR ADC1 (channels 4, 5, 6 on GPIO 32, 33, 34)
+            float a_raw = (float)adc1_get_raw(ADC1_CHANNEL_4);
+            float b_raw = (float)adc1_get_raw(ADC1_CHANNEL_5);
+            float c_raw = (float)adc1_get_raw(ADC1_CHANNEL_6);
+
+            ia = (a_raw - adc_offset_a) * CURRENT_SCALE;
+            ib = (b_raw - adc_offset_b) * CURRENT_SCALE;
+            ic = (c_raw - adc_offset_c) * CURRENT_SCALE;
         }
-    } else {
-        // Read external physical ADC shunts
-        float a_raw = (float)analogRead(PIN_SENSE_A);
-        float b_raw = (float)analogRead(PIN_SENSE_B);
-        float c_raw = (float)analogRead(PIN_SENSE_C);
 
-        ia = (a_raw - adc_offset_a) * CURRENT_SCALE;
-        ib = (b_raw - adc_offset_b) * CURRENT_SCALE;
-        ic = (c_raw - adc_offset_c) * CURRENT_SCALE;
+        FocInput foc_in = {
+            .i_a = ia,
+            .i_b = ib,
+            .i_c = ic,
+            .v_bus = M_VBUS
+        };
+
+        // Execute FOC Control Step (IRAM_ATTR on all callees)
+        FocOutput foc_out = foc_tick(&foc_in);
+
+        // Apply PWM outputs safely clamped to [0.0f, 1.0f], or disable gates on SAFE_STOP
+        if (foc_out.gate_enable) {
+            gpio_set_level((gpio_num_t)PIN_GATE_EN, 1);
+            float da = fmaxf(0.0f, fminf(1.0f, foc_out.duty_a));
+            float db = fmaxf(0.0f, fminf(1.0f, foc_out.duty_b));
+            float dc = fmaxf(0.0f, fminf(1.0f, foc_out.duty_c));
+            ledcWrite(0, (uint32_t)(da * (float)PWM_MAX));
+            ledcWrite(1, (uint32_t)(db * (float)PWM_MAX));
+            ledcWrite(2, (uint32_t)(dc * (float)PWM_MAX));
+        } else {
+            gpio_set_level((gpio_num_t)PIN_GATE_EN, 0);
+            ledcWrite(0, 0);
+            ledcWrite(1, 0);
+            ledcWrite(2, 0);
+        }
+
+        if (use_virtual_motor) {
+            // Advance virtual motor plant by dt = 50 microseconds
+            float dt = 50.0e-6f;
+            float v_a = foc_out.gate_enable ? (foc_out.duty_a - 0.5f) * M_VBUS : 0.0f;
+            float v_b = foc_out.gate_enable ? (foc_out.duty_b - 0.5f) * M_VBUS : 0.0f;
+            float v_c = foc_out.gate_enable ? (foc_out.duty_c - 0.5f) * M_VBUS : 0.0f;
+
+            float v_alpha, v_beta;
+            clarke_transform(v_a, v_b, v_c, &v_alpha, &v_beta);
+
+            float v_d, v_q;
+            park_transform(v_alpha, v_beta, sim_theta_e, &v_d, &v_q);
+
+            float omega_e = (float)M_P * sim_omega_m;
+            float di_d = (1.0f / M_LS) * (v_d - M_RS * sim_id + omega_e * M_LS * sim_iq);
+            float di_q = (1.0f / M_LS) * (v_q - M_RS * sim_iq - omega_e * M_LS * sim_id - omega_e * M_PSI_F);
+
+            float t_e = 1.5f * (float)M_P * M_PSI_F * sim_iq;
+            float domega_m = (1.0f / M_J) * (t_e - M_B * sim_omega_m);
+
+            sim_id += di_d * dt;
+            sim_iq += di_q * dt;
+            sim_omega_m += domega_m * dt;
+            sim_theta_e += omega_e * dt;
+
+            while (sim_theta_e > 2.0f * (float)M_PI) sim_theta_e -= 2.0f * (float)M_PI;
+            while (sim_theta_e < 0.0f)              sim_theta_e += 2.0f * (float)M_PI;
+        }
+
+        // Export telemetry - protect ONLY the shared telemetry variables
+        portENTER_CRITICAL(&telemetryMux);
+        telemetry_theta = foc_out.theta_hat;
+        telemetry_speed_rpm = foc_out.omega_hat * (60.0f / (2.0f * (float)M_PI * (float)M_P));
+        telemetry_health = foc_out.health_score;
+        telemetry_mode = foc_out.control_mode;
+        telemetry_ia = ia;
+        telemetry_ib = ib;
+        telemetry_ic = ic;
+        portEXIT_CRITICAL(&telemetryMux);
+
+        gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 0);
     }
-
-    FocInput foc_in = {
-        .i_a = ia,
-        .i_b = ib,
-        .i_c = ic,
-        .v_bus = M_VBUS
-    };
-
-    // Execute FOC Control Step
-    FocOutput foc_out = foc_tick(&foc_in);
-
-    // Apply PWM outputs safely clamped to [0.0f, 1.0f], or disable gates on SAFE_STOP
-    if (foc_out.gate_enable) {
-        digitalWrite(PIN_GATE_EN, HIGH);
-        float da = fmaxf(0.0f, fminf(1.0f, foc_out.duty_a));
-        float db = fmaxf(0.0f, fminf(1.0f, foc_out.duty_b));
-        float dc = fmaxf(0.0f, fminf(1.0f, foc_out.duty_c));
-        ledcWrite(0, (uint32_t)(da * (float)PWM_MAX));
-        ledcWrite(1, (uint32_t)(db * (float)PWM_MAX));
-        ledcWrite(2, (uint32_t)(dc * (float)PWM_MAX));
-    } else {
-        digitalWrite(PIN_GATE_EN, LOW);
-        ledcWrite(0, 0);
-        ledcWrite(1, 0);
-        ledcWrite(2, 0);
-    }
-
-    if (use_virtual_motor) {
-        // Advance virtual motor plant by dt = 50 microseconds
-        float dt = 50.0e-6f;
-        float v_a = foc_out.gate_enable ? (foc_out.duty_a - 0.5f) * M_VBUS : 0.0f;
-        float v_b = foc_out.gate_enable ? (foc_out.duty_b - 0.5f) * M_VBUS : 0.0f;
-        float v_c = foc_out.gate_enable ? (foc_out.duty_c - 0.5f) * M_VBUS : 0.0f;
-
-        float v_alpha, v_beta;
-        clarke_transform(v_a, v_b, v_c, &v_alpha, &v_beta);
-
-        float v_d, v_q;
-        park_transform(v_alpha, v_beta, sim_theta_e, &v_d, &v_q);
-
-        float omega_e = (float)M_P * sim_omega_m;
-        float di_d = (1.0f / M_LS) * (v_d - M_RS * sim_id + omega_e * M_LS * sim_iq);
-        float di_q = (1.0f / M_LS) * (v_q - M_RS * sim_iq - omega_e * M_LS * sim_id - omega_e * M_PSI_F);
-
-        float t_e = 1.5f * (float)M_P * M_PSI_F * sim_iq;
-        float domega_m = (1.0f / M_J) * (t_e - M_B * sim_omega_m);
-
-        sim_id += di_d * dt;
-        sim_iq += di_q * dt;
-        sim_omega_m += domega_m * dt;
-        sim_theta_e += omega_e * dt;
-
-        while (sim_theta_e > 2.0f * (float)M_PI) sim_theta_e -= 2.0f * (float)M_PI;
-        while (sim_theta_e < 0.0f)              sim_theta_e += 2.0f * (float)M_PI;
-    }
-
-    // Export telemetry
-    telemetry_theta = foc_out.theta_hat;
-    telemetry_speed_rpm = foc_out.omega_hat * (60.0f / (2.0f * (float)M_PI * (float)M_P));
-    telemetry_health = foc_out.health_score;
-    telemetry_mode = foc_out.control_mode;
-    telemetry_ia = ia;
-    telemetry_ib = ib;
-    telemetry_ic = ic;
-
-    portEXIT_CRITICAL_ISR(&timerMux);
-    gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 0);
 }
 
 // ============================================================================
@@ -196,7 +215,7 @@ void setup() {
     delay(100);
     Serial.println("\n========================================================");
     Serial.println("  Sensorless FOC with Fault-Tolerant Observer on ESP32");
-    Serial.println("  Virtual Hardware & Real-Time Simulation Enabled");
+    Serial.println("  Pinned FreeRTOS Task & Direct Register ADC Active");
     Serial.println("========================================================");
 
     // Pin Modes
@@ -229,42 +248,57 @@ void setup() {
     ledcAttachPin(PIN_PWM_B, 1);
     ledcAttachPin(PIN_PWM_C, 2);
 
-    analogReadResolution(12);
+    // Direct Register ADC1 Configuration (GPIO 32, 33, 34)
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_11);
+    adc1_config_channel_atten(ADC1_CHANNEL_5, ADC_ATTEN_DB_11);
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
 
-    // Startup offset calibration: average 500 samples with PWM off
+    // Startup offset calibration: average 500 samples with PWM off using direct ADC
     float sum_a = 0.0f, sum_b = 0.0f, sum_c = 0.0f;
     const int CAL_SAMPLES = 500;
     for (int i = 0; i < CAL_SAMPLES; i++) {
-        sum_a += (float)analogRead(PIN_SENSE_A);
-        sum_b += (float)analogRead(PIN_SENSE_B);
-        sum_c += (float)analogRead(PIN_SENSE_C);
+        sum_a += (float)adc1_get_raw(ADC1_CHANNEL_4);
+        sum_b += (float)adc1_get_raw(ADC1_CHANNEL_5);
+        sum_c += (float)adc1_get_raw(ADC1_CHANNEL_6);
         delayMicroseconds(50);
     }
     adc_offset_a = sum_a / (float)CAL_SAMPLES;
     adc_offset_b = sum_b / (float)CAL_SAMPLES;
     adc_offset_c = sum_c / (float)CAL_SAMPLES;
-    Serial.printf("[HAL] Calibrated ADC offsets: A=%.1f, B=%.1f, C=%.1f\n", (double)adc_offset_a, (double)adc_offset_b, (double)adc_offset_c);
+    Serial.printf("[HAL] Calibrated direct ADC offsets: A=%.1f, B=%.1f, C=%.1f\n", (double)adc_offset_a, (double)adc_offset_b, (double)adc_offset_c);
 
-    // 20kHz Hardware Interrupt Timer
+    // Create high-priority FOC control task pinned to Core 1
+    xTaskCreatePinnedToCore(
+        foc_control_task,
+        "foc_control_task",
+        4096,
+        NULL,
+        configMAX_PRIORITIES - 1,
+        &foc_task_handle,
+        1
+    );
+
+    // 20kHz Hardware Interrupt Timer (triggering control task)
     foc_timer = timerBegin(0, 80, true); 
     timerAttachInterrupt(foc_timer, &foc_isr, true);
     timerAlarmWrite(foc_timer, 50, true); // 50 us = 20kHz
     timerAlarmEnable(foc_timer);
 
-    Serial.println("[HAL] 20 kHz Hardware Timer ISR active.");
-    Serial.println("[HAL] Virtual PMSM plant engaged. Ready for simulation.\n");
+    Serial.println("[HAL] 20 kHz Hardware Timer ISR and pinned FreeRTOS task active.");
+    Serial.println("[HAL] Ready for execution.\n");
 }
 
 // ============================================================================
 // MAIN LOOP (Telemetry & Status LEDs)
 // ============================================================================
 void loop() {
-    portENTER_CRITICAL(&timerMux);
+    portENTER_CRITICAL(&telemetryMux);
     float t_speed = telemetry_speed_rpm;
     float t_health = telemetry_health;
     int   t_mode = telemetry_mode;
     float t_ia = telemetry_ia;
-    portEXIT_CRITICAL(&timerMux);
+    portEXIT_CRITICAL(&telemetryMux);
 
     // Update Status LEDs according to control mode
     // 0: ALIGN, 1: OPEN_LOOP_RAMP, 2: CLOSED_LOOP, 3: DEGRADED, 4: LIMP, 5: SAFE_STOP

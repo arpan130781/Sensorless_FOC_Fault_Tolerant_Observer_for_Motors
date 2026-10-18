@@ -20,7 +20,7 @@ void obs_mgr_reset(ObserverManager* mgr) {
     mgr->health = 1.0f;
 }
 
-void obs_mgr_update(ObserverManager* mgr, float v_alpha, float v_beta, float i_alpha, float i_beta, float omega_est, float dt) {
+IRAM_ATTR void obs_mgr_update(ObserverManager* mgr, float v_alpha, float v_beta, float i_alpha, float i_beta, float omega_est, float dt) {
     smo_update(&mgr->smo, v_alpha, v_beta, i_alpha, i_beta, dt);
     flux_obs_update(&mgr->flux, v_alpha, v_beta, i_alpha, i_beta, omega_est, dt);
     
@@ -61,7 +61,7 @@ void obs_mgr_update(ObserverManager* mgr, float v_alpha, float v_beta, float i_a
 
 }
 
-float obs_mgr_get_theta(ObserverManager* mgr) {
+IRAM_ATTR float obs_mgr_get_theta(ObserverManager* mgr) {
     if (mgr->observer_select == 1) return smo_get_theta(&mgr->smo);
     if (mgr->observer_select == 2) return flux_obs_get_theta(&mgr->flux);
     
@@ -80,7 +80,7 @@ float obs_mgr_get_theta(ObserverManager* mgr) {
     return atan2f(s, c);
 }
 
-float obs_mgr_get_omega(ObserverManager* mgr) {
+IRAM_ATTR float obs_mgr_get_omega(ObserverManager* mgr) {
     if (mgr->observer_select == 1) return smo_get_omega(&mgr->smo);
     if (mgr->observer_select == 2) return flux_obs_get_omega(&mgr->flux);
     

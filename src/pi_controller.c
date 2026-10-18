@@ -11,7 +11,7 @@ void pi_reset(PIController* pi) {
     pi->integral = 0.0f; pi->output = 0.0f;
 }
 
-float pi_update(PIController* pi, float error, float dt) {
+IRAM_ATTR float pi_update(PIController* pi, float error, float dt) {
     float unsat = (error * pi->kp) + pi->integral;
     bool sat_high = (unsat >= pi->output_max && error > 0.0f);
     bool sat_low  = (unsat <= pi->output_min && error < 0.0f);
@@ -28,7 +28,7 @@ float pi_update(PIController* pi, float error, float dt) {
     return pi->output;
 }
 
-void pi_back_calculate(PIController* pi, float limited_output, float error) {
+IRAM_ATTR void pi_back_calculate(PIController* pi, float limited_output, float error) {
     float desired_integral = limited_output - (error * pi->kp);
     if (desired_integral > pi->output_max) desired_integral = pi->output_max;
     if (desired_integral < pi->output_min) desired_integral = pi->output_min;

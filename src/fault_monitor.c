@@ -38,7 +38,7 @@ void fault_reset(FaultMonitor* fm) {
     fm->onset_channel = -1;
 }
 
-FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
+IRAM_ATTR FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float i_c,
                          float v_alpha, float v_beta,
                          float theta, float omega,
                          int controller_mode, bool transient_inhibit, float dt)

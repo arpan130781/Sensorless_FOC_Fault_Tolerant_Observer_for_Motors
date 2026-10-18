@@ -15,7 +15,7 @@ void if_startup_reset(IFStartup* s) {
     s->done = false;
 }
 
-void if_startup_update(IFStartup* s, float dt, float* out_theta, float* out_id, float* out_iq, bool* out_done) {
+IRAM_ATTR void if_startup_update(IFStartup* s, float dt, float* out_theta, float* out_id, float* out_iq, bool* out_done) {
     s->timer += dt;
     
     if (s->timer < s->t_align) {
