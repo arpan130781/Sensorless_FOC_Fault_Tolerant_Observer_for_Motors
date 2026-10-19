@@ -299,8 +299,15 @@ While the control algorithms and software simulations have been fully verified, 
 1. **ADC Sampling Synchronization with Space Vector Center:**
    - In physical three-phase inverters, phase currents must be sampled precisely at the center of the zero-voltage vector ($V_0$ or $V_7$) to avoid switching noise and ringing.
    - On the ESP32, hardware timer synchronization via MCPWM capture/compare or I2S/DMA ADC triggering must be validated using an oscilloscope.
-2. **Physical Dead-Time Compensation:**
-   - The simulation models dead-time voltage drops ($V_{dead} \cdot \text{sign}(i)$). Physical bridge MOSFETs/IGBTs exhibit non-linear parasitic capacitance charge/discharge characteristics that require empirical dead-time compensation calibration.
+2. **Physical Dead-Time Compensation & Parameter Mismatch Sensitivity:**
+   - The simulation models dead-time voltage drops ($V_{dead} \cdot \text{sign}(i)$), parameterized via $V_{dead} = t_{dead} \cdot f_{pwm} \cdot V_{bus}$ in [`src/motor_params.h`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/motor_params.h).
+   - SIL sensitivity sweeps across plant dead-times with a controller assuming 0.50 V ($t_{dead} = 1.042\,\mu\text{s}$) yield:
+     - $V_{dead} = 0.50\,\text{V}$ (matched): **0.49°** max angle error.
+     - $V_{dead} = 0.25\,\text{V}$: **6.49°** max angle error.
+     - $V_{dead} = 1.00\,\text{V}$: **3.54°** max angle error.
+     - $V_{dead} = 1.50\,\text{V}$: **7.13°** max angle error.
+     - $V_{dead} = 0.00\,\text{V}$: **19.29°** max angle error (documented degradation above 15.0° baseline threshold caused by zero-crossing over-compensation square wave). Setting `dead_time = 0.0` recovers max angle error to **0.48°**.
+   - Physical bridge MOSFETs/IGBTs exhibit non-linear parasitic capacitance charge/discharge characteristics that require empirical dead-time compensation calibration on hardware.
 3. **Low-Speed Observability Limit:**
    - Below 10–15% rated speed, the motor's back-EMF magnitude ($e = \psi_f \omega_e$) drops below the noise floor of standard low-side current shunts. Physical hardware must transition to high-frequency injection (HFI) or rely on open-loop I/F control during low-speed crawling.
 4. **Physical Shunt Resistor Tolerances and Thermal Drift:**

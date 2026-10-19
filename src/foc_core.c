@@ -33,12 +33,14 @@ static float prev_obs_omega = 0.0f;
 static float filtered_domega_dt = 0.0f;
 static float prev_omega_ref = 0.0f;
 static float ref_transient_timer = 0.0f;
+static float v_dead_comp = 0.5f;
 
 void foc_init(const MotorParams* m, const ControllerParams* c) {
     motor = *m;
     ctrl = *c;
     dt_curr = 1.0f / ctrl.pwm_freq;
     dt_spd = 1.0f / ctrl.ctrl_rate_spd;
+    v_dead_comp = ctrl.dead_time * ctrl.pwm_freq * motor.Vbus;
     foc_reset();
 }
 
@@ -315,13 +317,13 @@ FocOutput foc_tick(const FocInput* input) {
     float va, vb, vc;
     inv_clarke_transform(valpha, vbeta, &va, &vb, &vc);
 
-    // Observers receive the actual applied voltages including dead-time distortion (0.5 V)
+    // Observers receive the actual applied voltages including dead-time distortion
     float ia_c = fminf(motor.In, fmaxf(-motor.In, ia));
     float ib_c = fminf(motor.In, fmaxf(-motor.In, ib));
     float ic_c = fminf(motor.In, fmaxf(-motor.In, ic));
-    float va_app = va - (ia_c > 0.05f ? 0.5f : (ia_c < -0.05f ? -0.5f : 0.0f));
-    float vb_app = vb - (ib_c > 0.05f ? 0.5f : (ib_c < -0.05f ? -0.5f : 0.0f));
-    float vc_app = vc - (ic_c > 0.05f ? 0.5f : (ic_c < -0.05f ? -0.5f : 0.0f));
+    float va_app = va - (ia_c > 0.05f ? v_dead_comp : (ia_c < -0.05f ? -v_dead_comp : 0.0f));
+    float vb_app = vb - (ib_c > 0.05f ? v_dead_comp : (ib_c < -0.05f ? -v_dead_comp : 0.0f));
+    float vc_app = vc - (ic_c > 0.05f ? v_dead_comp : (ic_c < -0.05f ? -v_dead_comp : 0.0f));
     float v_neut = (va_app + vb_app + vc_app) / 3.0f;
     clarke_transform(va_app - v_neut, vb_app - v_neut, vc_app - v_neut, &prev_v_alpha, &prev_v_beta);
 

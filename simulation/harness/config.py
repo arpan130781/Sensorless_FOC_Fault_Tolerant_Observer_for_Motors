@@ -32,7 +32,8 @@ CONTROLLER_PARAMS = {
     'observer_select': 0,
     'pwm_freq': 20000.0,
     'ctrl_rate_curr': 20000.0,
-    'ctrl_rate_spd': 1000.0
+    'ctrl_rate_spd': 1000.0,
+    'dead_time': 1.0416667e-6
 }
 
 if os.path.exists(_header_path):
@@ -64,6 +65,8 @@ if os.path.exists(_header_path):
         CONTROLLER_PARAMS['pwm_freq'] = float(_defines['CTRL_PARAM_PWM_FREQ'].rstrip('f'))
         CONTROLLER_PARAMS['ctrl_rate_curr'] = float(_defines['CTRL_PARAM_CTRL_CURR'].rstrip('f'))
         CONTROLLER_PARAMS['ctrl_rate_spd'] = float(_defines['CTRL_PARAM_CTRL_SPD'].rstrip('f'))
+    if 'CTRL_PARAM_DEAD_TIME' in _defines:
+        CONTROLLER_PARAMS['dead_time'] = float(_defines['CTRL_PARAM_DEAD_TIME'].rstrip('f'))
 
 SIM_PARAMS = {
     'dt_control': 1.0 / CONTROLLER_PARAMS['pwm_freq'],

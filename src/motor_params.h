@@ -40,6 +40,7 @@
 #define CTRL_PARAM_PWM_FREQ     20000.0f    // PWM & current loop frequency (Hz)
 #define CTRL_PARAM_CTRL_CURR    20000.0f    // Current control execution rate (Hz)
 #define CTRL_PARAM_CTRL_SPD     1000.0f     // Speed loop execution rate (Hz)
+#define CTRL_PARAM_DEAD_TIME    1.0416667e-6f // Inverter dead-time (s): Vdead = dead_time * pwm_freq * Vbus = 0.5V
 
 static inline MotorParams get_default_motor_params(void) {
     MotorParams p = {
@@ -70,7 +71,8 @@ static inline ControllerParams get_default_controller_params(void) {
         .observer_select = CTRL_PARAM_OBS_SELECT,
         .pwm_freq = CTRL_PARAM_PWM_FREQ,
         .ctrl_rate_curr = CTRL_PARAM_CTRL_CURR,
-        .ctrl_rate_spd = CTRL_PARAM_CTRL_SPD
+        .ctrl_rate_spd = CTRL_PARAM_CTRL_SPD,
+        .dead_time = CTRL_PARAM_DEAD_TIME
     };
     return c;
 }

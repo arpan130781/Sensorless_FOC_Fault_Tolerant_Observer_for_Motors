@@ -61,7 +61,8 @@ class ControllerParams(ctypes.Structure):
         ("observer_select", ctypes.c_int),
         ("pwm_freq", ctypes.c_float),
         ("ctrl_rate_curr", ctypes.c_float),
-        ("ctrl_rate_spd", ctypes.c_float)
+        ("ctrl_rate_spd", ctypes.c_float),
+        ("dead_time", ctypes.c_float)
     ]
 
 class FocController:
@@ -80,7 +81,10 @@ class FocController:
         
     def init(self, motor_dict, ctrl_dict):
         m = MotorParams(**motor_dict)
-        c = ControllerParams(**ctrl_dict)
+        c_dict = dict(ctrl_dict)
+        if 'dead_time' not in c_dict:
+            c_dict['dead_time'] = 1.0416667e-6
+        c = ControllerParams(**c_dict)
         self.lib.foc_init(ctypes.byref(m), ctypes.byref(c))
         
     def tick(self, i_a, i_b, i_c, v_bus):

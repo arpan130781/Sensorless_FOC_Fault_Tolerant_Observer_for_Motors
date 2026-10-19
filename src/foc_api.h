@@ -37,6 +37,7 @@ typedef struct {
     float flux_wc;
     int observer_select; 
     float pwm_freq, ctrl_rate_curr, ctrl_rate_spd;
+    float dead_time;
 } ControllerParams;
 
 #ifndef IRAM_ATTR

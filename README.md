@@ -603,6 +603,23 @@ The simulation suite supports both Permanent Magnet Synchronous Motors (PMSM) an
 The inverter model converts controller duty ratios into phase-voltage quantities including inverter dead-time voltage drops.
 SIL results are evidence about the simulated system, not proof of performance on physical hardware.
 
+### Inverter Dead-Time Compensation & Mismatch Sensitivity
+
+The controller derives its feedforward dead-time voltage compensation from canonical parameters in [`src/motor_params.h`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/motor_params.h):
+$$V_{dead} = t_{dead} \cdot f_{pwm} \cdot V_{bus}$$
+For $t_{dead} = 1.0417\,\mu\text{s}$, $f_{pwm} = 20\,\text{kHz}$, and $V_{bus} = 24.0\,\text{V}$, $V_{dead} = 0.50\,\text{V}$.
+
+SIL sensitivity testing across plant dead-times against a controller configured with the nominal 0.50 V assumption yields the following measured performance:
+
+| Plant Dead-Time ($V_{dead}$) | Controller Assumption | Max Angle Error | Acceptance Criterion ($<15.0^\circ$) | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **0.50 V** | 0.50 V (Matched) | **0.49°** | Pass | Nominal baseline operation |
+| **0.25 V** | 0.50 V ($-0.25$ V Mismatch) | **6.49°** | Pass | Harmonic ripple within tolerance |
+| **1.00 V** | 0.50 V ($+0.50$ V Mismatch) | **3.54°** | Pass | Harmonic ripple within tolerance |
+| **1.50 V** | 0.50 V ($+1.00$ V Mismatch) | **7.13°** | Pass | Harmonic ripple within tolerance |
+| **0.00 V** | 0.50 V ($-0.50$ V Over-Comp) | **19.29°** | Degraded ($> 15.0^\circ$) | Documented degradation from zero-crossing over-compensation |
+| **0.00 V** | 0.00 V (Reconfigured $t_{dead}=0$) | **0.48°** | Pass | Recovered via parameter adjustment |
+
 ## 9.3 Fault Injection
 
 The fault injector supports several fault types.

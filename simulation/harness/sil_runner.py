@@ -69,10 +69,17 @@ class SimulationResult:
     confidence_flux: np.ndarray
 
 class SILRunner:
-    def __init__(self, config_sim, fault_scenario=None, sensor_model=None):
+    def __init__(self, config_sim, fault_scenario=None, sensor_model=None, v_dead_plant=None, custom_ctrl_params=None):
         self.config = config_sim
         self.scenario_name = fault_scenario
         self.sensor_model = sensor_model
+        self.custom_ctrl_params = custom_ctrl_params
+        if v_dead_plant is not None:
+            self.v_dead_plant = float(v_dead_plant)
+        elif config_sim and 'v_dead_plant' in config_sim:
+            self.v_dead_plant = float(config_sim['v_dead_plant'])
+        else:
+            self.v_dead_plant = 0.5
         
         lib_path = PATHS['lib_path']
         if not os.path.exists(lib_path):
@@ -96,7 +103,8 @@ class SILRunner:
             self.injector = NullFaultInjector()
             
     def run(self):
-        self.controller.init(MOTOR_PARAMS, CONTROLLER_PARAMS)
+        ctrl_p = self.custom_ctrl_params if self.custom_ctrl_params is not None else CONTROLLER_PARAMS
+        self.controller.init(MOTOR_PARAMS, ctrl_p)
         speed_ref = self.config['speed_ref_rpm']
         if self.scenario_config and 'speed_ref_rpm' in self.scenario_config:
             speed_ref = self.scenario_config['speed_ref_rpm']
@@ -158,7 +166,7 @@ class SILRunner:
                     vb = -self.plant.psi_f * omega_e * math.sin(th - 2.0 * math.pi / 3.0)
                     vc = -self.plant.psi_f * omega_e * math.sin(th + 2.0 * math.pi / 3.0)
             else:
-                va, vb, vc = duties_to_voltages(out.duty_a, out.duty_b, out.duty_c, vbus, ia, ib, ic)  # true currents -> dead-time polarity
+                va, vb, vc = duties_to_voltages(out.duty_a, out.duty_b, out.duty_c, vbus, ia, ib, ic, v_dead=self.v_dead_plant)  # true currents -> dead-time polarity
             
             load = 0.0
             if self.scenario_config and 'load_step' in self.scenario_config:
