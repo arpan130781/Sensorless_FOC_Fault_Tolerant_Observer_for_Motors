@@ -5,6 +5,7 @@
 
 #define KCL_THRESH 0.3f
 #define KCL_CONSECUTIVE_EXCEED_LIMIT 5  /* Require 5 consecutive exceedances (250 us @ 20 kHz) to reject noise bursts up to 4 samples */
+#define KCL_SEVERE_THRESH 1.5f          /* Severe residual threshold for fast track (2 consecutive samples) */
 #define ISOLATION_WINDOW 0.001f   /* 1 ms accumulation window */
 #define RECOVERY_WINDOW 0.500f   /* 500 ms sustained healthy before clearing */
 
@@ -87,7 +88,8 @@ IRAM_ATTR FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float
         fm->kcl_exceed_count = 0;
         fm->candidate_onset_channel = -1;
     }
-    bool k_fault = (fm->kcl_exceed_count >= KCL_CONSECUTIVE_EXCEED_LIMIT);
+    bool k_fault = (fm->kcl_exceed_count >= KCL_CONSECUTIVE_EXCEED_LIMIT) ||
+                   (fabsf(E) > KCL_SEVERE_THRESH && fm->kcl_exceed_count >= 2);
 
     /* ---- Last-known-good kinematics ---- */
     if (!k_sample_exceed && !fm->fault_latch_a && !fm->fault_latch_b && !fm->fault_latch_c && !fm->ambiguous_fault) {
