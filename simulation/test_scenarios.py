@@ -329,6 +329,49 @@ def test_single_sample_spike_rejection(phase, offset):
     assert pct_dip <= 3.0, f"Speed dipped by {pct_dip:.2f}% (> 3.0%) on spike {phase} {offset}A (extra dip {extra_dip:.2f} RPM)"
 
 
+class BurstSampleSpikeInjector(NullFaultInjector):
+    def __init__(self, target_time, phase, offset, burst_len):
+        super().__init__()
+        self.target_time = target_time
+        self.phase = phase
+        self.offset = offset
+        self.burst_len = burst_len
+        self.count = 0
+
+    def corrupt_currents(self, ia, ib, ic, t):
+        if t >= self.target_time and self.count < self.burst_len:
+            self.count += 1
+            if self.phase == 'a':
+                return ia + self.offset, ib, ic
+            elif self.phase == 'b':
+                return ia, ib + self.offset, ic
+            elif self.phase == 'c':
+                return ia, ib, ic + self.offset
+        return ia, ib, ic
+
+
+@pytest.mark.parametrize("burst_len", [1, 2, 3, 4])
+@pytest.mark.parametrize("offset", [0.5, 1.0])
+@pytest.mark.parametrize("phase", ['a', 'b', 'c'])
+def test_burst_spike_rejection(burst_len, offset, phase):
+    """
+    Round 3 - Task 2 regression test:
+    Verify that bursts of 1..4 samples (+0.5A, +1.0A on phases a, b, c) cause no mode change.
+    Assert control_mode never leaves CLOSED_LOOP (mode 2).
+    """
+    cfg = dict(SIM_PARAMS)
+    cfg['total_time'] = 2.2
+    runner = SILRunner(config_sim=cfg, fault_scenario='no_fault_baseline')
+    runner.injector = BurstSampleSpikeInjector(2.0, phase, offset, burst_len)
+    res = runner.run()
+
+    closed_loop_mask = res.time >= 1.5
+    modes = set(res.control_mode[closed_loop_mask])
+    assert modes == {2.0}, (
+        f"Control mode left CLOSED_LOOP (mode 2) on burst {burst_len} samples on phase {phase} (+{offset}A): modes={modes}"
+    )
+
+
 def test_safe_stop_reachable_on_second_fault_and_ambiguous():
     """
     Task 4 regression test:

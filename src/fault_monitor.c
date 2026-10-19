@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 #define KCL_THRESH 0.3f
-#define KCL_CONSECUTIVE_EXCEED_LIMIT 2  /* Require 2 consecutive exceedances (100 us @ 20 kHz) to reject single-sample spikes */
+#define KCL_CONSECUTIVE_EXCEED_LIMIT 5  /* Require 5 consecutive exceedances (250 us @ 20 kHz) to reject noise bursts up to 4 samples */
 #define ISOLATION_WINDOW 0.001f   /* 1 ms accumulation window */
 #define RECOVERY_WINDOW 0.500f   /* 500 ms sustained healthy before clearing */
 
