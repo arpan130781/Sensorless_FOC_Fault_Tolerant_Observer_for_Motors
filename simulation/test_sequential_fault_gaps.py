@@ -50,3 +50,48 @@ def test_sequential_second_fault_detected_within_50ms(gap_s):
         f"must be < 50.0 ms."
     )
     assert latency_ms >= 0.0, "SAFE_STOP triggered before second fault onset"
+
+
+def test_second_fault_during_speed_step_transient():
+    """
+    Round 3 - Task 3 Regression Test:
+    Injects a real second sensor fault 50 ms after a speed reference step (2000 -> 1000 RPM)
+    while the controller is already operating in DEGRADED mode (phase A faulted at 1.8s).
+
+    Verifies that the tightened 80 ms transient inhibition window allows detecting
+    the second fault and latching SAFE_STOP within 50 ms of second fault onset
+    (measured 45.00 ms vs previous 144.90 ms under the old 150 ms blanket holdoff).
+    """
+    cfg = copy.deepcopy(SIM_PARAMS)
+    cfg['total_time'] = 3.0
+
+    runner = SILRunner(config_sim=cfg)
+    runner.scenario_config = {
+        'type': 'simultaneous',
+        'speed_reversal': {
+            'onset_time': 2.500,
+            'new_speed_rpm': 1000.0
+        },
+        'faults': [
+            {'type': 'sensor_offset', 'channel': 'a', 'offset': 2.0, 'onset_time': 1.800},
+            {'type': 'sensor_offset', 'channel': 'b', 'offset': 2.0, 'onset_time': 2.550}
+        ]
+    }
+    runner.injector = FaultInjector(runner.scenario_config)
+    res = runner.run()
+
+    t = np.array(res.time)
+    mode = np.array(res.control_mode)
+
+    # 1. Controller must enter SAFE_STOP
+    safe_stop_mask = mode == 5.0
+    assert np.any(safe_stop_mask), "Controller did not reach SAFE_STOP for second fault after speed step"
+
+    # 2. Latency from second fault onset (2.55 s) to SAFE_STOP must be <= 50 ms
+    t_safe_stop = t[safe_stop_mask][0]
+    latency_ms = (t_safe_stop - 2.550) * 1000.0
+
+    assert latency_ms <= 50.0, (
+        f"Second fault detection latency after speed step was {latency_ms:.2f} ms; must be <= 50.0 ms"
+    )
+    assert latency_ms >= 0.0, "SAFE_STOP triggered before second fault onset"

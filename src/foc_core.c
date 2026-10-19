@@ -104,7 +104,7 @@ FocOutput foc_tick(const FocInput* input) {
     
     // Transient inhibition check for second-fault false trips
     if (fabsf(current_omega_ref - prev_omega_ref) > 10.0f) {
-        ref_transient_timer = 0.150f;
+        ref_transient_timer = 0.080f;
         prev_omega_ref = current_omega_ref;
     }
     if (ref_transient_timer > 0.0f) {
