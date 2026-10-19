@@ -67,6 +67,7 @@ class SimulationResult:
     emf_mag: np.ndarray
     confidence_smo: np.ndarray
     confidence_flux: np.ndarray
+    v_bus: np.ndarray = None
 
 class SILRunner:
     def __init__(self, config_sim, fault_scenario=None, sensor_model=None, v_dead_plant=None, custom_ctrl_params=None):
@@ -80,6 +81,12 @@ class SILRunner:
             self.v_dead_plant = float(config_sim['v_dead_plant'])
         else:
             self.v_dead_plant = 0.5
+        
+        # Physical diode-bridge and DC bus parameters
+        self.vbus_actual = float(MOTOR_PARAMS['Vbus'])
+        self.c_bus = 470.0e-6    # 470 uF DC bus capacitor
+        self.r_bleed = 50.0      # 50 Ohm bleeder resistor / DC bus load
+        self.v_diode = 0.7       # 0.7 V body-diode forward drop
         
         lib_path = PATHS['lib_path']
         if not os.path.exists(lib_path):
@@ -126,7 +133,8 @@ class SILRunner:
             angle_error = np.zeros(N), speed_rpm = np.zeros(N), fault_channel = np.zeros(N),
             i_a_rec = np.zeros(N), i_b_rec = np.zeros(N), i_c_rec = np.zeros(N),
             smo_health = np.zeros(N), flux_health = np.zeros(N), observer_disagreement = np.zeros(N),
-            emf_mag = np.zeros(N), confidence_smo = np.zeros(N), confidence_flux = np.zeros(N)
+            emf_mag = np.zeros(N), confidence_smo = np.zeros(N), confidence_flux = np.zeros(N),
+            v_bus = np.zeros(N)
         )
         
         for k in range(steps):
@@ -143,30 +151,31 @@ class SILRunner:
                 ia, ib, ic = self.sensor_model.measure_phases(ia, ib, ic)
 
             ia_corr, ib_corr, ic_corr = self.injector.corrupt_currents(ia, ib, ic, t)
-            vbus = self.injector.corrupt_vbus(MOTOR_PARAMS['Vbus'], t)
+            vbus_nominal = self.injector.corrupt_vbus(MOTOR_PARAMS['Vbus'], t)
             
             # Controller
-            out = self.controller.tick(ia_corr, ib_corr, ic_corr, vbus)
+            out = self.controller.tick(ia_corr, ib_corr, ic_corr, self.vbus_actual)
             
             gate_en = getattr(out, 'gate_enable', True)
-            if not gate_en:
+            if gate_en:
+                self.vbus_actual = vbus_nominal
+                va, vb, vc = duties_to_voltages(out.duty_a, out.duty_b, out.duty_c, self.vbus_actual, ia, ib, ic, v_dead=self.v_dead_plant)  # true currents -> dead-time polarity
+            else:
                 # High-impedance mode: all inverter switches OFF.
                 # Body diodes conduct only when line-to-line back-EMF exceeds DC bus (rectification)
-                # or while rapidly quenching existing inductor energy. Otherwise, phase currents are zero.
+                # or while rapidly quenching existing inductor energy. Otherwise, terminal voltages track back-EMF.
                 omega_e = self.plant.omega_e
                 e_ll_pk = math.sqrt(3.0) * self.plant.psi_f * abs(omega_e)
-                if e_ll_pk > vbus:
+                if e_ll_pk > self.vbus_actual + 2.0 * self.v_diode:
                     # Diode bridge rectifies into bus, clamping terminal voltage opposing rotation
                     vd = 0.0
-                    vq = -math.copysign(vbus / math.sqrt(3.0), omega_e)
+                    vq = -math.copysign((self.vbus_actual + 2.0 * self.v_diode) / math.sqrt(3.0), omega_e)
                 else:
                     # Open-circuit back-EMF terminal voltages for logging
                     th = self.plant.theta_e
                     va = -self.plant.psi_f * omega_e * math.sin(th)
                     vb = -self.plant.psi_f * omega_e * math.sin(th - 2.0 * math.pi / 3.0)
                     vc = -self.plant.psi_f * omega_e * math.sin(th + 2.0 * math.pi / 3.0)
-            else:
-                va, vb, vc = duties_to_voltages(out.duty_a, out.duty_b, out.duty_c, vbus, ia, ib, ic, v_dead=self.v_dead_plant)  # true currents -> dead-time polarity
             
             load = 0.0
             if self.scenario_config and 'load_step' in self.scenario_config:
@@ -189,41 +198,57 @@ class SILRunner:
                 if not gate_en:
                     omega_e = self.plant.omega_e
                     e_ll_pk = math.sqrt(3.0) * self.plant.psi_f * abs(omega_e)
-                    if e_ll_pk > vbus:
+                    ia_p, ib_p, ic_p = self.plant.get_phase_currents()
+                    i_mag = math.hypot(self.plant.i_d, self.plant.i_q)
+
+                    if e_ll_pk > self.vbus_actual + 2.0 * self.v_diode:
+                        # Diode bridge rectifies into bus (back-EMF exceeds Vbus + 2*Vd)
                         vd = 0.0
-                        vq = -math.copysign(vbus / math.sqrt(3.0), omega_e)
+                        vq = -math.copysign((self.vbus_actual + 2.0 * self.v_diode) / math.sqrt(3.0), omega_e)
+                        i_bus_in = max(0.0, ia_p) + max(0.0, ib_p) + max(0.0, ic_p)
+                        i_bleed = max(0.0, (self.vbus_actual - vbus_nominal) / self.r_bleed)
+                        self.vbus_actual += (i_bus_in - i_bleed) / self.c_bus * dt_p
                         self.plant.step(vd, vq, load, dt_p)
-                    else:
-                        i_mag = math.hypot(self.plant.i_d, self.plant.i_q)
-                        if i_mag > 0.02:
-                            # Inductor freewheeling quench through body diodes
-                            vd = -math.copysign(vbus / math.sqrt(3.0), self.plant.i_d) if abs(self.plant.i_d) > 0.005 else 0.0
-                            vq = -math.copysign(vbus / math.sqrt(3.0), self.plant.i_q) if abs(self.plant.i_q) > 0.005 else 0.0
+                    elif i_mag > 0.005:
+                        # Inductor freewheeling quench through body diodes
+                        v_rail_a = -(self.vbus_actual + 2.0 * self.v_diode) / 2.0 if ia_p > 0.002 else ((self.vbus_actual + 2.0 * self.v_diode) / 2.0 if ia_p < -0.002 else 0.0)
+                        v_rail_b = -(self.vbus_actual + 2.0 * self.v_diode) / 2.0 if ib_p > 0.002 else ((self.vbus_actual + 2.0 * self.v_diode) / 2.0 if ib_p < -0.002 else 0.0)
+                        v_rail_c = -(self.vbus_actual + 2.0 * self.v_diode) / 2.0 if ic_p > 0.002 else ((self.vbus_actual + 2.0 * self.v_diode) / 2.0 if ic_p < -0.002 else 0.0)
+                        vn = (v_rail_a + v_rail_b + v_rail_c) / 3.0
+                        v_pa = v_rail_a - vn
+                        v_pb = v_rail_b - vn
+                        v_pc = v_rail_c - vn
+                        v_alpha = (2.0 / 3.0) * (v_pa - 0.5 * v_pb - 0.5 * v_pc)
+                        v_beta = (2.0 / 3.0) * (math.sqrt(3.0) / 2.0) * (v_pb - v_pc)
+                        th = self.plant.theta_e
+                        vd = v_alpha * math.cos(th) + v_beta * math.sin(th)
+                        vq = -v_alpha * math.sin(th) + v_beta * math.cos(th)
+
+                        # Current dumped into bus capacitor through upper body diodes
+                        i_bus_in = max(0.0, ia_p) + max(0.0, ib_p) + max(0.0, ic_p)
+                        i_bleed = max(0.0, (self.vbus_actual - vbus_nominal) / self.r_bleed)
+                        self.vbus_actual += (i_bus_in - i_bleed) / self.c_bus * dt_p
+
+                        # Physical diode blocking check: forward conduction only
+                        # If opposing voltage drives current past zero, diode blocks reverse conduction
+                        di_d = (1.0 / self.plant.Ls) * (vd - self.plant.Rs * self.plant.i_d + omega_e * self.plant.Ls * self.plant.i_q)
+                        di_q = (1.0 / self.plant.Ls) * (vq - self.plant.Rs * self.plant.i_q - omega_e * self.plant.Ls * self.plant.i_d - omega_e * self.plant.psi_f)
+                        if (self.plant.i_d + di_d * dt_p) * self.plant.i_d <= 0.0 and abs(self.plant.i_d) < 0.1:
+                            self.plant.i_d = 0.0
+                        if (self.plant.i_q + di_q * dt_p) * self.plant.i_q <= 0.0 and abs(self.plant.i_q) < 0.1:
+                            self.plant.i_q = 0.0
+                        if abs(self.plant.i_d) > 0.0 or abs(self.plant.i_q) > 0.0:
                             self.plant.step(vd, vq, load, dt_p)
-                            if (vd * self.plant.i_d > 0.0) or (vq * self.plant.i_q > 0.0):
-                                self.plant.i_d = 0.0
-                                self.plant.i_q = 0.0
-                                if hasattr(self.plant, 'i_a'):
-                                    self.plant.i_a = 0.0
-                                    self.plant.i_b = 0.0
-                                    self.plant.i_c = 0.0
                         else:
-                            # Quenched: zero current, pure mechanical coasting
-                            self.plant.i_d = 0.0
-                            self.plant.i_q = 0.0
-                            if hasattr(self.plant, 'i_a'):
-                                self.plant.i_a = 0.0
-                                self.plant.i_b = 0.0
-                                self.plant.i_c = 0.0
-                            vd = 0.0
-                            vq = omega_e * self.plant.psi_f
-                            self.plant.step(vd, vq, load, dt_p)
-                            self.plant.i_d = 0.0
-                            self.plant.i_q = 0.0
-                            if hasattr(self.plant, 'i_a'):
-                                self.plant.i_a = 0.0
-                                self.plant.i_b = 0.0
-                                self.plant.i_c = 0.0
+                            # Both components reached zero; diodes block
+                            self.plant.step(0.0, omega_e * self.plant.psi_f, load, dt_p)
+                    else:
+                        # Quenched: all diodes reverse-biased, terminal voltages match back-EMF, Te = 0
+                        # Natural ODE equilibrium: vd=0, vq=omega_e*psi_f produces did/dt = 0, diq/dt = 0
+                        i_bleed = max(0.0, (self.vbus_actual - vbus_nominal) / self.r_bleed)
+                        self.vbus_actual -= (i_bleed / self.c_bus) * dt_p
+                        self.vbus_actual = max(vbus_nominal, self.vbus_actual)
+                        self.plant.step(0.0, omega_e * self.plant.psi_f, load, dt_p)
                 else:
                     vd, vq = phase_to_dq(va, vb, vc, self.plant.theta_e)
                     self.plant.step(vd, vq, load, dt_p)
@@ -249,6 +274,7 @@ class SILRunner:
             res.duty_c[k] = out.duty_c
             res.health_score[k] = out.health_score
             res.control_mode[k] = out.control_mode
+            res.v_bus[k] = self.vbus_actual
             
             err = p_state['theta_e'] - out.theta_hat
             err = (err + math.pi) % (2*math.pi) - math.pi

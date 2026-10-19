@@ -49,3 +49,15 @@ def test_safe_stop_peak_current_below_limit():
         assert quenched_peak < 0.5, (
             f"Quenched phase current after SAFE_STOP was {quenched_peak:.2f} A; expected near zero."
         )
+
+    # Task 5: Verify DC bus voltage rise from inductive freewheeling into Cbus
+    assert res.v_bus is not None, "SimulationResult must record v_bus"
+    vbus_nominal = MOTOR_PARAMS['Vbus']
+    vbus_peak = float(np.max(res.v_bus[safe_stop_mask]))
+    vbus_rise = vbus_peak - vbus_nominal
+    assert vbus_rise > 0.1, (
+        f"Expected bus voltage rise during SAFE_STOP quenching, but got {vbus_rise:.3f} V."
+    )
+    # Bus voltage should bleed back down toward nominal via bleeder resistor
+    vbus_final = float(res.v_bus[-1])
+    assert vbus_final <= vbus_peak, "Bus voltage must bleed down after inductive quench"
