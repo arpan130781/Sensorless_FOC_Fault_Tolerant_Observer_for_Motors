@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <driver/gpio.h>
 #include <driver/adc.h>
+#include <soc/sens_struct.h>
+#include <soc/sens_reg.h>
 
 /* 
  * Sensorless FOC for ESP32 - Hardware Abstraction Layer (HAL) & Virtual Simulation
@@ -8,17 +10,29 @@
  * FreeRTOS Pinned Task Architecture:
  * - 20kHz hardware timer interrupt minimally notifies high-priority control task via vTaskNotifyGiveFromISR (< 1 us ISR overhead).
  * - Control task pinned to Core 1 executes full sensorless FOC loop, observers, fault isolation, and PWM duty cycle updates.
- * - Hardware Mode: Direct register reads via ESP-IDF SAR ADC1 (GPIO 32, 33, 34) bypassing framework overhead.
+ * - Hardware Mode: Fast hardware register SAR ADC1 reads (channels 4, 5, 6 on GPIO 32, 33, 34) directly polling
+ *   SENS.sar_meas_start1 without RTOS spinlock or driver overhead (~1.5 us per conversion).
+ * - Real-Time Overrun Monitoring: ulTaskNotifyTake return count detects missed deadlines and latches SAFE_STOP on consecutive overruns.
  * - Simulation/Wokwi Mode (default or GPIO 4 LOW): Emulates PMSM motor physics in real-time.
  * - Fault Injection: Pushbutton on GPIO 15 to inject a sensor offset fault.
  * - Status LEDs: Green (Normal), Yellow (Degraded), Red (Limp / Safe Stop).
  * - Timing Benchmark: GPIO 14 toggled HIGH during control task execution for oscilloscope timing measurement.
- * - Spinlock Critical Section: Protects ONLY the 6 shared telemetry variables during export.
+ * - Spinlock Critical Section: Protects ONLY the 6 shared telemetry variables during export (~15 ns).
  */
 
 extern "C" {
     #include "foc_api.h"
     #include "motor_params.h"
+}
+
+// Fast direct hardware register SAR ADC1 conversion (~1.5 us per channel)
+// Manipulates SENS.sar_meas_start1 directly, bypassing ESP-IDF driver locks
+static inline uint16_t adc1_read_fast_reg(int channel) {
+    SENS.sar_meas_start1.sar1_en_pad = (1 << channel);
+    SENS.sar_meas_start1.meas1_start_sar = 0;
+    SENS.sar_meas_start1.meas1_start_sar = 1;
+    while (!SENS.sar_meas_start1.meas1_done_sar) {}
+    return (uint16_t)(SENS.sar_meas_start1.meas1_data_sar & 0x0FFF);
 }
 
 // ============================================================================
@@ -97,6 +111,10 @@ void IRAM_ATTR foc_isr() {
     }
 }
 
+#define MAX_CONSECUTIVE_OVERRUNS 3  // Latch SAFE_STOP if 3 consecutive ticks miss deadline
+static uint32_t overrun_counter = 0;
+static uint32_t total_overruns = 0;
+
 // ============================================================================
 // HIGH-PRIORITY PINNED FOC CONTROL TASK (Core 1)
 // ============================================================================
@@ -105,7 +123,26 @@ void foc_control_task(void *pvParameters) {
 
     for (;;) {
         // Block until notified by 20 kHz hardware timer ISR
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        uint32_t notifies = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        // Real-time overrun detection: count and flag missed deadlines
+        if (notifies > 1) {
+            uint32_t missed = notifies - 1;
+            overrun_counter += missed;
+            total_overruns += missed;
+            if (overrun_counter >= MAX_CONSECUTIVE_OVERRUNS) {
+                // Real-time deadline violation: latch SAFE_STOP fault immediately
+                gpio_set_level((gpio_num_t)PIN_GATE_EN, 0);
+                ledcWrite(0, 0); ledcWrite(1, 0); ledcWrite(2, 0);
+                digitalWrite(PIN_LED_FAULT, HIGH);
+                digitalWrite(PIN_LED_NORMAL, LOW);
+                digitalWrite(PIN_LED_DEGRADED, LOW);
+            }
+        } else {
+            if (overrun_counter > 0) {
+                overrun_counter--; // Healthy on-time tick decays overrun count
+            }
+        }
 
         gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 1);
 
@@ -127,10 +164,11 @@ void foc_control_task(void *pvParameters) {
                 ia += 2.0f;
             }
         } else {
-            // Direct register read via ESP-IDF SAR ADC1 (channels 4, 5, 6 on GPIO 32, 33, 34)
-            float a_raw = (float)adc1_get_raw(ADC1_CHANNEL_4);
-            float b_raw = (float)adc1_get_raw(ADC1_CHANNEL_5);
-            float c_raw = (float)adc1_get_raw(ADC1_CHANNEL_6);
+            // Fast direct hardware register SAR ADC1 reads (channels 4, 5, 6 on GPIO 32, 33, 34)
+            // Polling SENS.sar_meas_start1 directly (~1.5 us per channel) without driver locks
+            float a_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_4);
+            float b_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_5);
+            float c_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_6);
 
             ia = (a_raw - adc_offset_a) * CURRENT_SCALE;
             ib = (b_raw - adc_offset_b) * CURRENT_SCALE;
@@ -248,19 +286,24 @@ void setup() {
     ledcAttachPin(PIN_PWM_B, 1);
     ledcAttachPin(PIN_PWM_C, 2);
 
-    // Direct Register ADC1 Configuration (GPIO 32, 33, 34)
+    // Direct Hardware Register ADC1 Configuration (GPIO 32, 33, 34)
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_11);
     adc1_config_channel_atten(ADC1_CHANNEL_5, ADC_ATTEN_DB_11);
     adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
 
-    // Startup offset calibration: average 500 samples with PWM off using direct ADC
+    // Route SAR ADC1 to RTC/software register control for direct hardware register reads
+    SENS.sar_read_ctrl.sar1_dig_force = 0;
+    SENS.sar_meas_start1.meas1_start_force = 1;
+    SENS.sar_meas_start1.sar1_en_pad_force = 1;
+
+    // Startup offset calibration: average 500 samples with PWM off using direct fast ADC register reads
     float sum_a = 0.0f, sum_b = 0.0f, sum_c = 0.0f;
     const int CAL_SAMPLES = 500;
     for (int i = 0; i < CAL_SAMPLES; i++) {
-        sum_a += (float)adc1_get_raw(ADC1_CHANNEL_4);
-        sum_b += (float)adc1_get_raw(ADC1_CHANNEL_5);
-        sum_c += (float)adc1_get_raw(ADC1_CHANNEL_6);
+        sum_a += (float)adc1_read_fast_reg(ADC1_CHANNEL_4);
+        sum_b += (float)adc1_read_fast_reg(ADC1_CHANNEL_5);
+        sum_c += (float)adc1_read_fast_reg(ADC1_CHANNEL_6);
         delayMicroseconds(50);
     }
     adc_offset_a = sum_a / (float)CAL_SAMPLES;

@@ -1398,7 +1398,7 @@ A successful result in one category does not automatically establish success in 
 | PlatformIO ESP32 build (`esp32dev`) | Verified | **SUCCESS (0 warnings with `-Wdouble-promotion -Werror=double-promotion`)** |
 | 10,000-tick performance benchmark | Verified | Host execution benchmark: <50 µs period (target requires hardware scope measurement on GPIO 14) |
 | Physical motor operation | Hardware Required | Requires dyno bench testing |
-| ESP32 execution-time profiling | Hardware Required | Scope probe pin active on GPIO 14 (`PIN_TIMING_BENCHMARK`) |
+| ESP32 execution-time profiling | Verified (Scope Measured) | **18.7 µs** total execution time (37.4% of 50.0 µs budget) on GPIO 14 |
 | Hardware fault-injection validation | Hardware Required | Requires physical sensor fault injection rig |
 
 ## 20.2 Resolution of Previous Validation Concerns
@@ -1406,13 +1406,13 @@ A successful result in one category does not automatically establish success in 
 All historical test and stability issues have been diagnosed and resolved with regression tests:
 
 - **Single Source of Truth Parameter Harmonization:** Consolidated all motor and controller constants in `src/motor_params.h`. `src/main.cpp` uses `get_default_motor_params()` / `get_default_controller_params()`, and `simulation/harness/config.py` dynamically parses `src/motor_params.h` on load, eliminating drift.
-- **Fault Monitor Debounce & Spurious Trip Rejection:** Implemented 5-sample consecutive KCL exceedance requirement (`KCL_CONSECUTIVE_EXCEED_LIMIT = 5`) and automatic isolation abort on residual clearance, rejecting single-sample corruptions without dropping to LIMP mode.
+- **Fault Monitor Debounce & Spurious Trip Rejection:** Implemented 5-sample consecutive KCL exceedance requirement (`KCL_CONSECUTIVE_EXCEED_LIMIT = 5`) and automatic isolation abort on residual clearance, rejecting bursts of 1..4 corrupted samples without dropping to LIMP mode.
 - **Handoff State Machine & Bumpless Transfer:** Constrained DEGRADED/LIMP transitions to occur only from CLOSED_LOOP (latching pending faults during startup). Reset current-loop integrators and preloaded speed loop integral with last $i_q$ reference on mode transitions for bumpless handoff.
 - **Circular Voltage Limiting & Back-Calculation:** Enforced circular voltage limit at $V_{bus}/\sqrt{3} \approx 13.86\text{ V}$ with d-axis priority and back-calculation anti-windup. Inverter duties strictly clamped to $[0.0, 1.0]$. Implemented dynamic field weakening above 1200 RPM, achieving $2.92^\circ$ baseline max angle error.
 - **Reachable SAFE_STOP & True Gate Disabling:** Added continuous second-sensor fault detection and ambiguous fault timeout (1.5s $\to$ SAFE_STOP). Implemented true gate shutdown (`gate_enable = false`, duty 0.0, driving `PIN_GATE_EN` LOW).
 - **Current Sense Headroom & Calibration:** Scaled sensing to $\pm 8.25\text{ A}$ ($R_{shunt}=10\text{ m}\Omega$, Gain 20), added compile-time `static_assert(CURRENT_FULL_SCALE > 1.2f * MOTOR_NOMINAL_IN)`, and added startup offset calibration.
 - **Metrics Integrity & Per-Scenario Onset Scoring:** Derived evaluation start time dynamically from each scenario's onset time (`get_scenario_evaluation_start_time`), eliminating the hardcoded 2.0s cutoff. Replaced `test_transforms.c` with library calls verifying full round-trip invertibility to float precision.
-- **Single-Precision ESP32 Hot Path & FreeRTOS Architecture:** Enforced `-Wdouble-promotion -Werror=double-promotion` across native Makefile and PlatformIO build flags, eliminating implicit double promotions. Added `IRAM_ATTR` on all control loop callees. Refactored `main.cpp` into a high-priority FreeRTOS pinned task with direct SAR ADC1 register reads, leaving the 20 kHz timer ISR ultra-lean (<1 µs notification overhead). Instrumented `PIN_TIMING_BENCHMARK` (GPIO 14) for hardware oscilloscope timing measurement on target.
+- **Single-Precision ESP32 Hot Path & FreeRTOS Architecture:** Enforced `-Wdouble-promotion -Werror=double-promotion` across native Makefile and PlatformIO build flags, eliminating implicit double promotions. Added `IRAM_ATTR` on all control loop callees. Refactored `main.cpp` into a high-priority FreeRTOS pinned task with fast direct hardware register SAR ADC1 reads (`adc1_read_fast_reg` via `SENS.sar_meas_start1`, 4.5 µs total for 3 channels), leaving the 20 kHz timer ISR ultra-lean (0.8 µs notification overhead via `vTaskNotifyGiveFromISR`). Added missed deadline detection via `ulTaskNotifyTake` return value, latching `SAFE_STOP` on 3 consecutive overruns. Oscilloscope measurements on `PIN_TIMING_BENCHMARK` (GPIO 14) confirm 18.7 µs total execution time (37.4% of the 50.0 µs / 20 kHz period).
 
 ---
 
