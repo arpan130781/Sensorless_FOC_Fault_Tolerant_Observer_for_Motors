@@ -350,13 +350,25 @@ class BurstSampleSpikeInjector(NullFaultInjector):
         return ia, ib, ic
 
 
-@pytest.mark.parametrize("burst_len", [1, 2, 3, 4])
-@pytest.mark.parametrize("offset", [0.5, 1.0])
-@pytest.mark.parametrize("phase", ['a', 'b', 'c'])
+_BURST_CASES = [
+    (bl, off, ph)
+    for bl in [1, 2, 3, 4]
+    for off in [0.5, 1.0]
+    for ph in ['a', 'b', 'c']
+] + [
+    (bl, off, ph)
+    for bl in [1, 2]
+    for off in [2.0, 3.0]
+    for ph in ['a', 'b', 'c']
+]
+
+
+@pytest.mark.parametrize("burst_len,offset,phase", _BURST_CASES)
 def test_burst_spike_rejection(burst_len, offset, phase):
     """
-    Round 3 - Task 2 regression test:
-    Verify that bursts of 1..4 samples (+0.5A, +1.0A on phases a, b, c) cause no mode change.
+    Round 3 & Round 4 regression test:
+    Verify that noise bursts of 1..4 samples (+0.5A, +1.0A) and 1..2 samples (+2.0A, +3.0A)
+    on phases a, b, c cause no false fault latching or mode change.
     Assert control_mode never leaves CLOSED_LOOP (mode 2).
     """
     cfg = dict(SIM_PARAMS)

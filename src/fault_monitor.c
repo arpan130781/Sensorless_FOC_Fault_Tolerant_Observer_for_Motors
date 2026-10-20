@@ -89,7 +89,7 @@ IRAM_ATTR FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float
         fm->candidate_onset_channel = -1;
     }
     bool k_fault = (fm->kcl_exceed_count >= KCL_CONSECUTIVE_EXCEED_LIMIT) ||
-                   (fabsf(E) > KCL_SEVERE_THRESH && fm->kcl_exceed_count >= 2);
+                   (fabsf(E) > KCL_SEVERE_THRESH && fm->kcl_exceed_count >= 3);
 
     /* ---- Last-known-good kinematics ---- */
     if (!k_sample_exceed && !fm->fault_latch_a && !fm->fault_latch_b && !fm->fault_latch_c && !fm->ambiguous_fault) {
@@ -274,7 +274,7 @@ IRAM_ATTR FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float
             fm->err_acc_C += err_C * dt;
             fm->err_acc_Amb += err_Amb * dt;
             fm->E_acc += fabsf(E) * dt;
-            float iso_win = (fm->stuck_count_a >= 10 || fm->stuck_count_b >= 10 || fm->stuck_count_c >= 10) ? 0.0005f : ISOLATION_WINDOW;
+            float iso_win = (fm->stuck_count_a >= 8 || fm->stuck_count_b >= 8 || fm->stuck_count_c >= 8) ? 0.0004f : ISOLATION_WINDOW;
             if (fm->fault_isolation_timer >= iso_win) {
                 float eA = fm->err_acc_A;
                 float eB = fm->err_acc_B;
@@ -285,7 +285,7 @@ IRAM_ATTR FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float
                 float min_single = fminf(eA, fminf(eB, eC));
                 bool is_ambiguous = (eAmb < min_single * 0.7f) && (fm->E_acc > 0.0001f)
                                  && (fm->onset_channel < 0)
-                                 && (fm->stuck_count_a < 10 && fm->stuck_count_b < 10 && fm->stuck_count_c < 10);
+                                 && (fm->stuck_count_a < 8 && fm->stuck_count_b < 8 && fm->stuck_count_c < 8);
 
                 int best = -1;
                 bool confident = false;
@@ -294,12 +294,12 @@ IRAM_ATTR FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float
                     fm->ambiguous_fault = true;
                 } else {
                     /* Authoritative identification:
-                     * 1. Stuck sensor: >= 10 consecutive identical samples (0.5 ms)
+                     * 1. Stuck sensor: >= 8 consecutive identical samples (0.4 ms)
                      * 2. Onset jump: clear single-channel jump matching KCL residual
                      */
-                    if (fm->stuck_count_a >= 10) { best = 0; confident = true; }
-                    else if (fm->stuck_count_b >= 10) { best = 1; confident = true; }
-                    else if (fm->stuck_count_c >= 10) { best = 2; confident = true; }
+                    if (fm->stuck_count_a >= 8) { best = 0; confident = true; }
+                    else if (fm->stuck_count_b >= 8) { best = 1; confident = true; }
+                    else if (fm->stuck_count_c >= 8) { best = 2; confident = true; }
                     else if (fm->onset_channel >= 0 && fm->E_acc > 0.0001f) {
                         best = fm->onset_channel;
                         confident = true;
@@ -333,9 +333,9 @@ IRAM_ATTR FaultStatus fault_update(FaultMonitor* fm, float i_a, float i_b, float
                     }
 
                     int required_consecutive = (fm->onset_channel >= 0 ||
-                                                fm->stuck_count_a >= 10 ||
-                                                fm->stuck_count_b >= 10 ||
-                                                fm->stuck_count_c >= 10) ? 1 : 2;
+                                                fm->stuck_count_a >= 8 ||
+                                                fm->stuck_count_b >= 8 ||
+                                                fm->stuck_count_c >= 8) ? 1 : 2;
 
                     if (fm->consecutive_confident >= required_consecutive) {
                         /* Latch the identified faulty channel */
