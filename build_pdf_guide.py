@@ -5,8 +5,9 @@ build_pdf_guide.py
 Generates an authoritative, publication-grade, spacious technical manual
 for the Fault-Tolerant Sensorless Field-Oriented Motor Control (FOC) repository.
 
-Designed with generous breathing room, large readable fonts (9.5pt body),
-spacious padding, and high-resolution embedded simulation graphs.
+Designed with generous breathing room, large readable fonts (9.2pt body),
+spacious padding, clean Unicode/HTML mathematical formatting (ZERO raw LaTeX),
+and high-resolution embedded simulation graphs.
 """
 
 import os
@@ -97,6 +98,25 @@ def callout_box(title, text, styles, border_color=C_SECONDARY, bg_color=C_BG_CAR
     return t
 
 
+def equation_box(title, eq_lines, styles, border_color=C_SECONDARY, bg_color=C_BG_CARD):
+    content = []
+    if title:
+        content.append(Paragraph(f"<b>{title.upper()}</b>", styles['EqTitle']))
+        content.append(Spacer(1, 3))
+    for eq in eq_lines:
+        content.append(Paragraph(eq, styles['EqText']))
+    t = Table([[content]], colWidths=[540])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), bg_color),
+        ('BOX', (0,0), (-1,-1), 1, border_color),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('LEFTPADDING', (0,0), (-1,-1), 12),
+        ('RIGHTPADDING', (0,0), (-1,-1), 12),
+    ]))
+    return t
+
+
 def build_pdf():
     os.makedirs(os.path.dirname(PDF_OUTPUT_PATH), exist_ok=True)
     doc = SimpleDocTemplate(
@@ -110,7 +130,7 @@ def build_pdf():
 
     styles = getSampleStyleSheet()
 
-    # Spacious, readable styles (9.5pt body, standard professional typography)
+    # Spacious, readable styles with zero raw LaTeX
     styles.add(ParagraphStyle('CoverTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=22, leading=26, textColor=C_PRIMARY, alignment=1))
     styles.add(ParagraphStyle('CoverSubTitle', parent=styles['Normal'], fontName='Helvetica', fontSize=11, leading=15, textColor=C_SECONDARY, alignment=1))
     styles.add(ParagraphStyle('ChapterHeader', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=15, leading=18, textColor=C_PRIMARY, keepWithNext=True, spaceBefore=8, spaceAfter=4))
@@ -120,6 +140,8 @@ def build_pdf():
     styles.add(ParagraphStyle('BodyLaymanBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9.2, leading=13.2, textColor=C_TEXT_DARK))
     styles.add(ParagraphStyle('CalloutTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8.5, leading=11, textColor=C_PRIMARY))
     styles.add(ParagraphStyle('CalloutBody', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, leading=12, textColor=C_TEXT_DARK))
+    styles.add(ParagraphStyle('EqTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, leading=10, textColor=C_SECONDARY))
+    styles.add(ParagraphStyle('EqText', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, leading=13, textColor=C_PRIMARY, spaceAfter=2))
     styles.add(ParagraphStyle('TableHeader', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, leading=10, textColor=colors.white, alignment=1))
     styles.add(ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=7.8, leading=10.2, textColor=C_TEXT_DARK))
     styles.add(ParagraphStyle('TableCellBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=7.8, leading=10.2, textColor=C_TEXT_DARK))
@@ -166,7 +188,7 @@ def build_pdf():
         "<b>Executive Engineering Mission:</b><br/>"
         "Permanent Magnet Synchronous Motors (PMSMs) provide the power density behind modern drones, robotics, and electric vehicles. "
         "Traditionally, controlling them requires fragile optical shaft encoders or Hall-effect sensors that frequently fail in high-vibration, high-temperature environments. "
-        "This repository implements an industrial-grade, <b>sensorless, fault-tolerant motor drive</b> running on a low-cost ESP32 microcontroller ($<\$5$). "
+        "This repository implements an industrial-grade, <b>sensorless, fault-tolerant motor drive</b> running on a low-cost ESP32 microcontroller (under $5). "
         "By continuously solving electromagnetic differential equations inside the firmware at 20 kHz, the controller tracks rotor angle without physical sensors. "
         "Furthermore, if a current sensor fails or shorts mid-operation, the controller detects and isolates the faulty channel within 15 milliseconds, "
         "reconfigures its mathematical pipeline to run on the remaining two sensors, and maintains continuous, uninterrupted torque delivery."
@@ -203,7 +225,7 @@ def build_pdf():
         [Paragraph("<b>Chapter 2: Field-Oriented Control (FOC) Demystified</b>", styles['TableCellBold']), Paragraph("Clarke & Park coordinate transforms, riding the rotating carousel frame, SVPWM voltage synthesis, and closed-loop pipeline.", styles['TableCell'])],
         [Paragraph("<b>Chapter 3: The Virtual Sensor (Sliding Mode & Flux Observers)</b>", styles['TableCellBold']), Paragraph("Sliding Mode Observer (SMO) differential equations, Phase-Locked Loops, and dual-observer cross-validation.", styles['TableCell'])],
         [Paragraph("<b>Chapter 4: Inverter Power Electronics Realities</b>", styles['TableCellBold']), Paragraph("MOSFET half-bridges, shoot-through prevention, dead-time distortion, and gate-off body-diode safe stop dynamics.", styles['TableCell'])],
-        [Paragraph("<b>Chapter 5: Fault Detection, Isolation & Reconfiguration</b>", styles['TableCellBold']), Paragraph("Kirchhoff's Current Law residual ($r_{KCL}$), 3-shunt hypothesis testing, 2-shunt reconstruction, and multi-tier debounce envelope.", styles['TableCell'])],
+        [Paragraph("<b>Chapter 5: Fault Detection, Isolation & Reconfiguration</b>", styles['TableCellBold']), Paragraph("Kirchhoff's Current Law residual (r<sub>KCL</sub>), 3-shunt hypothesis testing, 2-shunt reconstruction, and multi-tier debounce envelope.", styles['TableCell'])],
         [Paragraph("<b>Chapter 6: Detailed Physical Analysis of All 13 Test Scenarios</b>", styles['TableCellBold']), Paragraph("Master 13-Scenario Table, with high-resolution physical simulation response graphs for baseline, offsets, stuck sensors, load steps, and safe stops.", styles['TableCell'])],
         [Paragraph("<b>Chapter 7: Repository Codebase Anatomy</b>", styles['TableCellBold']), Paragraph("Deep-dive into 12 core files (`foc_core.c`, `fault_monitor.c`, `smo.c`, `main.cpp`, `sil_runner.py`) and their specific architectural roles.", styles['TableCell'])],
         [Paragraph("<b>Chapter 8: The Complete 128-Test Python Suite</b>", styles['TableCellBold']), Paragraph("Module-by-module breakdown across all 11 test suites verifying ISO/IEC physical metrics with 100% green pass rate.", styles['TableCell'])],
@@ -281,12 +303,13 @@ def build_pdf():
         "As our motor spins, it acts simultaneously as an electrical generator! The voltage it generates opposes the battery voltage—which is why it is called <b>Back-Electromotive Force (Back-EMF)</b>.",
         styles['BodyLayman']
     ))
+    story.append(Spacer(1, 4))
 
     backemf_box = (
         "<b>The Secret of Sensorless Control:</b><br/>"
-        "Back-EMF is not a nuisance; it is a treasure trove of physical information! "
-        "Its amplitude reveals rotor speed: $$E = \\psi_f \\cdot \\omega_e$$ "
-        "and its phase reveals the exact electrical angle of the rotor: $$\\theta_e = -\\text{atan2}(e_\\alpha, e_\\beta)$$ "
+        "Back-EMF is not a nuisance; it is a treasure trove of physical information!<br/>"
+        "• <b>Speed Information:</b> Back-EMF amplitude is directly proportional to rotor velocity: <b><i>E</i> = <i>ψ<sub>f</sub></i> · <i>ω<sub>e</sub></i></b><br/>"
+        "• <b>Angle Information:</b> Back-EMF vector direction reveals exact electrical angle: <b><i>θ<sub>e</sub></i> = -atan2(<i>e<sub>α</sub></i>, <i>e<sub>β</sub></i>)</b><br/>"
         "By measuring the motor's terminal voltages and currents, our software mathematically calculates the Back-EMF and 'sees' the rotor without physical sensors!"
     )
     story.append(callout_box("PHYSICAL PRINCIPLE", backemf_box, styles, border_color=C_SECONDARY, bg_color=colors.HexColor('#F0F9FF')))
@@ -296,7 +319,7 @@ def build_pdf():
     story.append(Paragraph(
         "Because Back-EMF depends directly on magnet motion, when the motor is stopped (0 RPM), <b>the Back-EMF is exactly zero volts</b>. "
         "At standstill, the motor is electrically 'blind'. To solve this fundamental physical limitation, our controller uses a 3-stage startup sequence:<br/><br/>"
-        "1. <b>ALIGN Stage (Mode 0):</b> The controller injects a steady DC current vector into Phase A for 500 ms ($t = 0.0$ to $0.5$ s). "
+        "1. <b>ALIGN Stage (Mode 0):</b> The controller injects a steady DC current vector into Phase A for 500 ms (t = 0.0 to 0.5 s). "
         "This creates a stationary magnetic field that pulls the rotor magnets into a known, predictable 0° reference position.<br/><br/>"
         "2. <b>OPEN_LOOP_RAMP Stage (Mode 1):</b> The controller synthesizes a rotating current vector that smoothly accelerates from 0 to 500 RPM (I-F ramp) over 1.0 s. "
         "Because current amplitude is forced independently of speed, the rotor is dragged along mechanically like a stepper motor.<br/><br/>"
@@ -310,8 +333,8 @@ def build_pdf():
     handoff_box = (
         "<b>Why Handoff Must Be Smooth:</b><br/>"
         "If you switch from open-loop to closed-loop when the observer angle is wrong (e.g. 90° error), the current vector will suddenly push in the wrong direction, "
-        "causing the motor to shudder, lose synchronism, and stall! Our handoff module enforces strict criteria: angular error $< 15^\circ$, speed variance $< 5\%$, "
-        "and observer health $> 80\\%$ before permitting handoff."
+        "causing the motor to shudder, lose synchronism, and stall! Our handoff module enforces strict criteria: angular error &lt; 15°, speed variance &lt; 5%, "
+        "and observer health &gt; 80% before permitting handoff."
     )
     story.append(callout_box("CRITICAL CONTROL REQUIREMENT", handoff_box, styles, border_color=C_ACCENT, bg_color=colors.HexColor('#FFFBEB')))
     story.append(PageBreak())
@@ -331,30 +354,38 @@ def build_pdf():
 
     story.append(Paragraph("2.1 The Clarke Transform (3-Phase to 2-Phase Stationary)", styles['SectionHeader']))
     story.append(Paragraph(
-        "The Clarke Transform converts physical 3-phase currents ($i_a, i_b, i_c$) into two stationary orthogonal axes: "
-        "<b>Alpha ($i_\\alpha$)</b> and <b>Beta ($i_\\beta$)</b>:<br/>"
-        "$$\\begin{bmatrix} i_\\alpha \\\\ i_\\beta \\end{bmatrix} = \\begin{bmatrix} 1 & 0 & 0 \\\\ 0 & \\frac{1}{\\sqrt{3}} & -\\frac{1}{\\sqrt{3}} \\end{bmatrix} \\begin{bmatrix} i_a \\\\ i_b \\\\ i_c \\end{bmatrix}$$<br/>"
-        "Using Kirchhoff's Current Law ($i_a + i_b + i_c = 0$), this simplifies to: $i_\\alpha = i_a$ and $i_\\beta = \\frac{1}{\\sqrt{3}}(i_a + 2i_b)$. "
-        "Now, instead of tracking 3 wires in 3D space, we track a 2D vector in a flat plane!",
+        "The Clarke Transform converts physical 3-phase currents (<i>i<sub>a</sub></i>, <i>i<sub>b</sub></i>, <i>i<sub>c</sub></i>) into two stationary orthogonal axes: "
+        "<b>Alpha (<i>i<sub>α</sub></i>)</b> and <b>Beta (<i>i<sub>β</sub></i>)</b>:",
         styles['BodyLayman']
     ))
 
+    clarke_eqs = [
+        "<b><i>i<sub>α</sub></i> = <i>i<sub>a</sub></i></b>",
+        "<b><i>i<sub>β</sub></i> = (1 / √3) · (<i>i<sub>a</sub></i> + 2<i>i<sub>b</sub></i>) ≈ 0.57735 · (<i>i<sub>a</sub></i> + 2<i>i<sub>b</sub></i>)</b>",
+        "<i>Constraint (Kirchhoff's Current Law): i<sub>a</sub> + i<sub>b</sub> + i<sub>c</sub> = 0. Tracking 3 wires in 3D becomes tracking a 2D vector in a flat plane!</i>"
+    ]
+    story.append(equation_box("Clarke Transform Equations", clarke_eqs, styles))
+    story.append(Spacer(1, 6))
+
     story.append(Paragraph("2.2 The Park Transform: Riding the Spinning Carousel", styles['SectionHeader']))
     story.append(Paragraph(
-        "Even in the $(\\alpha, \\beta)$ frame, the currents are still oscillating AC waves. "
-        "The Park Transform takes our frame of reference and attaches it directly to the spinning rotor at angle $\\theta$:<br/>"
-        "$$\\begin{bmatrix} i_d \\\\ i_q \\end{bmatrix} = \\begin{bmatrix} \\cos\\theta & \\sin\\theta \\\\ -\\sin\\theta & \\cos\\theta \\end{bmatrix} \\begin{bmatrix} i_\\alpha \\\\ i_\\beta \\end{bmatrix}$$<br/>"
-        "• <b>Direct Axis ($i_d$):</b> Measures current pointing straight into the rotor magnet. This creates magnetic flux but zero torque. We regulate $i_d = 0$.<br/>"
-        "• <b>Quadrature Axis ($i_q$):</b> Measures current pointing 90° ahead of the magnet. This creates 100% pure mechanical torque! Torque is proportional to $i_q$ ($T_e = \\frac{3}{2} p \\psi_f i_q$).",
+        "Even in the (<i>α</i>, <i>β</i>) frame, the currents are still oscillating AC waves. "
+        "The Park Transform takes our frame of reference and attaches it directly to the spinning rotor at electrical angle <i>θ</i>:",
         styles['BodyLayman']
     ))
+
+    park_eqs = [
+        "<b><i>i<sub>d</sub></i> = &nbsp; <i>i<sub>α</sub></i> · cos(<i>θ</i>) + <i>i<sub>β</sub></i> · sin(<i>θ</i>)</b> &nbsp;&nbsp;&nbsp;&nbsp;<i>(Direct Axis: magnetizing flux, regulated to 0 A)</i>",
+        "<b><i>i<sub>q</sub></i> = -<i>i<sub>α</sub></i> · sin(<i>θ</i>) + <i>i<sub>β</sub></i> · cos(<i>θ</i>)</b> &nbsp;&nbsp;&nbsp;&nbsp;<i>(Quadrature Axis: mechanical torque, T<sub>e</sub> = 1.5 · p · ψ<sub>f</sub> · i<sub>q</sub>)</i>"
+    ]
+    story.append(equation_box("Park Transform Equations", park_eqs, styles))
     story.append(Spacer(1, 4))
 
     park_analogy = (
         "<b>The Carousel Analogy:</b><br/>"
         "Imagine standing on the ground watching kids on a spinning merry-go-round. "
         "From the ground, their positions look like oscillating sine waves moving back and forth. But if you step onto the carousel with them, "
-        "they appear completely stationary! The Park Transform steps software onto the spinning rotor. In this spinning $(d, q)$ frame, "
+        "they appear completely stationary! The Park Transform steps software onto the spinning rotor. In this spinning (d, q) frame, "
         "the AC currents become constant DC numbers! Controlling motor torque becomes as simple as controlling a basic brushed DC motor."
     )
     story.append(callout_box("INTUITIVE ANALOGY", park_analogy, styles, border_color=C_SECONDARY, bg_color=colors.HexColor('#F0FDF4')))
@@ -362,7 +393,7 @@ def build_pdf():
 
     story.append(Paragraph("2.3 Space Vector PWM (SVPWM)", styles['SectionHeader']))
     story.append(Paragraph(
-        "Once PI controllers calculate required voltages $(v_d, v_q)$, the Inverse Park Transform rotates voltages back to the stationary frame $(v_\\alpha, v_\\beta)$. "
+        "Once PI controllers calculate required voltages (<i>v<sub>d</sub></i>, <i>v<sub>q</sub></i>), the Inverse Park Transform rotates voltages back to the stationary frame (<i>v<sub>α</sub></i>, <i>v<sub>β</sub></i>). "
         "Then, <b>Space Vector PWM (SVPWM)</b> synthesizes these voltages using the inverter's 8 switching states. "
         "Compared to standard sinusoidal PWM, SVPWM extracts <b>15.5% more voltage from the same battery</b> by injecting optimal 3rd-harmonic common-mode bias!",
         styles['BodyLayman']
@@ -389,31 +420,37 @@ def build_pdf():
 
     story.append(Paragraph("3.1 The Sliding Mode Observer (SMO)", styles['SectionHeader']))
     story.append(Paragraph(
-        "The SMO models stator differential equations: $$\\frac{d\\hat{i}_\\alpha}{dt} = \\frac{1}{L_s}(v_\\alpha - R_s \\hat{i}_\\alpha - \\hat{e}_\\alpha), \\quad \\frac{d\\hat{i}_\\beta}{dt} = \\frac{1}{L_s}(v_\\beta - R_s \\hat{i}_\\beta - \\hat{e}_\\beta)$$<br/>"
-        "If there is any difference between measured currents and modeled currents, the observer uses a switching control function ($z = k \\cdot \\text{sgn}(\\hat{i} - i)$) "
-        "to slide the model until current error is driven to zero. "
-        "The correction voltage required to keep the model locked to reality <b>is the physical Back-EMF $(\\hat{e}_\\alpha, \\hat{e}_\\beta)$</b>! "
-        "Taking $-\\text{atan2}(\\hat{e}_\\alpha, \\hat{e}_\\beta)$ yields rotor angle $\\hat{\\theta}$, smoothed by a Phase-Locked Loop (PLL) to extract speed $\\hat{\\omega}$.",
+        "The SMO models stator differential equations and uses switching functions to force estimated currents to match measured currents:",
         styles['BodyLayman']
     ))
+
+    smo_eqs = [
+        "<b>d<i>î<sub>α</sub></i> / dt = (1 / <i>L<sub>s</sub></i>) · (<i>v<sub>α</sub></i> - <i>R<sub>s</sub></i>·<i>î<sub>α</sub></i> - <i>ê<sub>α</sub></i>)</b>",
+        "<b>d<i>î<sub>β</sub></i> / dt = (1 / <i>L<sub>s</sub></i>) · (<i>v<sub>β</sub></i> - <i>R<sub>s</sub></i>·<i>î<sub>β</sub></i> - <i>ê<sub>β</sub></i>)</b>",
+        "<b>Rotor Angle Extraction:</b> <b><i>θ̂</i> = -atan2(<i>ê<sub>α</sub></i>, <i>ê<sub>β</sub></i>)</b>, smoothed by a Phase-Locked Loop (PLL) to extract speed <b><i>ω̂</i></b>."
+    ]
+    story.append(equation_box("Sliding Mode Observer Equations", smo_eqs, styles))
     story.append(Spacer(1, 6))
 
     story.append(Paragraph("3.2 Voltage-Model Flux Observer", styles['SectionHeader']))
     story.append(Paragraph(
-        "In parallel with the SMO, the controller runs a Stator Flux Observer. It integrates stator Back-EMF voltages directly: "
-        "$$\\psi_\\alpha = \\int (v_\\alpha - R_s i_\\alpha) dt, \\quad \\psi_\\beta = \\int (v_\\beta - R_s i_\\beta) dt$$<br/>"
-        "Rotor flux linkage is obtained by subtracting stator inductance drops: $\\psi_{r,\\alpha} = \\psi_\\alpha - L_s i_\\alpha$. "
-        "The rotor angle is simply $\\text{atan2}(\\psi_{r,\\beta}, \\psi_{r,\\alpha})$. "
-        "The Flux Observer has excellent high-frequency noise rejection during smooth, steady-state cruising.",
+        "In parallel with the SMO, the controller runs a Stator Flux Observer. It integrates stator Back-EMF voltages directly:",
         styles['BodyLayman']
     ))
+
+    flux_eqs = [
+        "<b>Stator Flux Integration:</b> <b><i>ψ<sub>α</sub></i> = ∫ (<i>v<sub>α</sub></i> - <i>R<sub>s</sub></i>·<i>i<sub>α</sub></i>) dt</b>, &nbsp;&nbsp;&nbsp;&nbsp;<b><i>ψ<sub>β</sub></i> = ∫ (<i>v<sub>β</sub></i> - <i>R<sub>s</sub></i>·<i>i<sub>β</sub></i>) dt</b>",
+        "<b>Rotor Flux Linkage:</b> <b><i>ψ<sub>r,α</sub></i> = <i>ψ<sub>α</sub></i> - <i>L<sub>s</sub></i>·<i>i<sub>α</sub></i></b>, &nbsp;&nbsp;&nbsp;&nbsp;<b><i>ψ<sub>r,β</sub></i> = <i>ψ<sub>β</sub></i> - <i>L<sub>s</sub></i>·<i>i<sub>β</sub></i></b>",
+        "<b>Rotor Angle:</b> <b><i>θ̂</i> = atan2(<i>ψ<sub>r,β</sub></i>, <i>ψ<sub>r,α</sub></i>)</b> &nbsp;&nbsp;<i>(High-frequency noise rejection during steady-state cruising)</i>"
+    ]
+    story.append(equation_box("Voltage-Model Flux Equations", flux_eqs, styles))
     story.append(Spacer(1, 6))
 
     observer_box = (
         "<b>Dual-Observer Architecture & Supervisor:</b><br/>"
         "• <b>Sliding Mode Observer (SMO):</b> Ultra-fast dynamic response; tracks aggressive speed steps and load shocks effortlessly.<br/>"
         "• <b>Flux Observer:</b> Integrates stator flux vectors; provides silky smooth estimation during steady-state cruising.<br/>"
-        "• <b>Observer Manager:</b> Cross-checks both observers simultaneously. If one diverges by $> 30^\circ$, it alerts the fault supervisor to evaluate sensor integrity!"
+        "• <b>Observer Manager:</b> Cross-checks both observers simultaneously. If one diverges by &gt; 30°, it alerts the fault supervisor to evaluate sensor integrity!"
     )
     story.append(callout_box("OBSERVER SUPERVISION", observer_box, styles, border_color=C_SECONDARY, bg_color=colors.HexColor('#F0FDF4')))
     story.append(PageBreak())
@@ -433,19 +470,23 @@ def build_pdf():
     story.append(Paragraph("4.1 Shoot-Through and Dead-Time Distortion", styles['SectionHeader']))
     story.append(Paragraph(
         "In each half-bridge leg, if the high-side and low-side MOSFETs turn on simultaneously, the battery voltage shorts directly to Ground in a catastrophic explosion (shoot-through). "
-        "Gate drivers enforce an intentional <b>dead-time</b> ($t_{dead} \\approx 1.0\\text{ µs}$) where both switches are off. "
-        "During dead-time, phase current is forced through MOSFET parasitic <b>body diodes</b>, creating terminal voltage distortion: "
-        "$$V_{dead} = t_{dead} \\cdot f_{pwm} \\cdot V_{bus} \\cdot \\text{sign}(i_{phase})$$<br/>"
-        "For $t_{dead} = 1.04\\text{ µs}$, $f_{pwm} = 20\\text{ kHz}$, and $V_{bus} = 24.0\\text{ V}$, this distortion equals $0.50\\text{ V}$.",
+        "Gate drivers enforce an intentional <b>dead-time</b> (<i>t<sub>dead</sub></i> ≈ 1.0 µs) where both switches are off. "
+        "During dead-time, phase current is forced through MOSFET parasitic <b>body diodes</b>, creating terminal voltage distortion:",
         styles['BodyLayman']
     ))
+
+    deadtime_eqs = [
+        "<b><i>V<sub>dead</sub></i> = <i>t<sub>dead</sub></i> · <i>f<sub>pwm</sub></i> · <i>V<sub>bus</sub></i> · sign(<i>i<sub>phase</sub></i>)</b>",
+        "<i>For t<sub>dead</sub> = 1.04 µs, f<sub>pwm</sub> = 20 kHz, and V<sub>bus</sub> = 24.0 V, this average distortion equals 0.50 V.</i>"
+    ]
+    story.append(equation_box("Dead-Time Voltage Distortion", deadtime_eqs, styles))
     story.append(Spacer(1, 4))
 
     deadtime_box = (
         "<b>Safe Firmware Default vs. Commissioning:</b><br/>"
         "Our controller provides feedforward dead-time compensation. However, on uncommissioned hardware, "
         "assuming a 0.5 V distortion when physical hardware has 0.0 V causes up to <b>19.3° of observer angle error</b>! "
-        "Therefore, the firmware defaults `dead_time = 0.0` unless explicitly commissioned via `#define DEAD_TIME_COMMISSIONED_S`. "
+        "Therefore, the firmware defaults <b>ctrl.dead_time = 0.0 s</b> unless explicitly commissioned via <b>#define DEAD_TIME_COMMISSIONED_S</b>. "
         "This ensures safe zero-distortion baseline behavior out of the box."
     )
     story.append(callout_box("POWER ELECTRONICS SAFETY", deadtime_box, styles, border_color=C_ACCENT, bg_color=colors.HexColor('#FFFBEB')))
@@ -454,12 +495,12 @@ def build_pdf():
     story.append(Paragraph("4.2 Safe Stop Dynamics & Body Diode Freewheeling", styles['SectionHeader']))
     story.append(Paragraph(
         "When a catastrophic dual-sensor fault occurs, the controller disables all inverter gates (`PIN_GATE_EN = 0`). "
-        "A spinning motor cannot stop instantaneously due to rotor inertia ($J = 1.5 \\times 10^{-5}\\text{ kg}\\cdot\\text{m}^2$). "
+        "A spinning motor cannot stop instantaneously due to rotor inertia (<i>J</i> = 1.5 × 10<sup>-5</sup> kg·m²). "
         "While spinning down, the motor acts as a 3-phase generator! "
         "If Back-EMF exceeds the DC bus voltage, current conducts through the MOSFET body diodes into the DC bus capacitor.<br/>"
         "• <b>Capacitor Voltage Rise:</b> Terminal voltage rises gently from 24.0 V to a peak of 24.45 V.<br/>"
-        "• <b>Bleeder Resistor Discharge:</b> A $50\\ \\Omega$ bleeder resistor continuously discharges the bus capacitor back to 24.0 V.<br/>"
-        "• <b>Peak Phase Current:</b> Body diode conduction stays strictly below $1.2 \\times I_n$ (6.0 A), protecting the silicon switches from over-current destruction.",
+        "• <b>Bleeder Resistor Discharge:</b> A 50 Ω bleeder resistor continuously discharges the bus capacitor back to 24.0 V.<br/>"
+        "• <b>Peak Phase Current:</b> Body diode conduction stays strictly below 1.2 × <i>I<sub>n</sub></i> (6.0 A), protecting the silicon switches from over-current destruction.",
         styles['BodyLayman']
     ))
     story.append(PageBreak())
@@ -479,10 +520,10 @@ def build_pdf():
     story.append(Paragraph("5.1 Kirchhoff's Current Law (KCL) & Residual Monitoring", styles['SectionHeader']))
     story.append(Paragraph(
         "In a star-connected 3-phase motor with an isolated neutral, electric current has nowhere else to go. "
-        "By Kirchhoff's Current Law: <b>$i_a(t) + i_b(t) + i_c(t) = 0$</b>.<br/>"
-        "The controller computes the KCL Residual every 50 µs: <b>$r_{KCL} = |i_a + i_b + i_c|$</b>. "
-        "In healthy operation, noise and ADC quantization keep $r_{KCL} < 0.15$ A. If any sensor develops a bias or freezes, $r_{KCL}$ leaps above **0.6 A**.<br/>"
-        "<b>Hypothesis Testing:</b> The supervisor tests 3 hypotheses ($i_a = -(i_b + i_c)$, $i_b = -(i_a + i_c)$, $i_c = -(i_a + i_b)$) against the observer model. "
+        "By Kirchhoff's Current Law: <b><i>i<sub>a</sub></i>(t) + <i>i<sub>b</sub></i>(t) + <i>i<sub>c</sub></i>(t) = 0</b>.<br/>"
+        "The controller computes the KCL Residual every 50 µs: <b><i>r<sub>KCL</sub></i> = |<i>i<sub>a</sub></i> + <i>i<sub>b</sub></i> + <i>i<sub>c</sub></i>|</b>. "
+        "In healthy operation, noise and ADC quantization keep <i>r<sub>KCL</sub></i> &lt; 0.15 A. If any sensor develops a bias or freezes, <i>r<sub>KCL</sub></i> leaps above <b>0.6 A</b>.<br/>"
+        "<b>Hypothesis Testing:</b> The supervisor tests 3 candidate hypotheses (<i>i<sub>a</sub></i> = -(<i>i<sub>b</sub></i> + <i>i<sub>c</sub></i>), <i>i<sub>b</sub></i> = -(<i>i<sub>a</sub></i> + <i>i<sub>c</sub></i>), <i>i<sub>c</sub></i> = -(<i>i<sub>a</sub></i> + <i>i<sub>b</sub></i>)) against the observer model. "
         "The true healthy pair matches the digital twin with tiny residual; the broken sensor creates massive error. "
         "The faulty sensor is isolated within 15 ms, and the controller transitions to <b>DEGRADED Mode (Mode 3)</b>, continuing to run on 2 shunts!",
         styles['BodyLayman']
@@ -496,9 +537,9 @@ def build_pdf():
     story.append(Paragraph("5.2 Multi-Tier Debounce & Burst-Immunity Envelope", styles['SectionHeader']))
     story.append(Paragraph(
         "To prevent false trips from EMI and electrical noise, the fault detector uses a calibrated multi-tier debounce filter:<br/>"
-        "• <b>1–2 sample spikes up to $\\pm 5.0$ A:</b> Completely rejected (zero mode change, speed dip < 3%).<br/>"
+        "• <b>1–2 sample spikes up to ±5.0 A:</b> Completely rejected (zero mode change, speed dip &lt; 3%).<br/>"
         "• <b>4 samples at 1.4 A:</b> Rejected as transient ripple.<br/>"
-        "• <b>Sustained faults ($\ge 3$ consecutive samples $\ge 1.5$ A):</b> Rapidly latches isolation within 150 µs.",
+        "• <b>Sustained faults (≥ 3 consecutive samples ≥ 1.5 A):</b> Rapidly latches isolation within 150 µs.",
         styles['BodyLayman']
     ))
     story.append(Spacer(1, 4))
@@ -521,11 +562,11 @@ def build_pdf():
 
     fsm_data = [
         [Paragraph("<b>Mode Code</b>", styles['TableHeader']), Paragraph("<b>Mode Name</b>", styles['TableHeader']), Paragraph("<b>Physical Operating State & Behavior</b>", styles['TableHeader']), Paragraph("<b>Exit Criteria / Next State</b>", styles['TableHeader'])],
-        [Paragraph("<b>Mode 0</b>", styles['TableCellCenter']), Paragraph("<b>ALIGN</b>", styles['TableCellBold']), Paragraph("Injects DC current into Phase A for 500 ms; holds rotor at 0°.", styles['TableCell']), Paragraph("500 ms timer expires $\\to$ OPEN_LOOP_RAMP", styles['TableCell'])],
-        [Paragraph("<b>Mode 1</b>", styles['TableCellCenter']), Paragraph("<b>OPEN_LOOP_RAMP</b>", styles['TableCellBold']), Paragraph("Synthesizes rotating I-F vector, accelerating from 0 to 500 RPM.", styles['TableCell']), Paragraph("Speed = 500 RPM & lock $< 15^\circ \\to$ CLOSED_LOOP", styles['TableCell'])],
-        [Paragraph("<b>Mode 2</b>", styles['TableCellCenter']), Paragraph("<b>CLOSED_LOOP</b>", styles['TableCellBold']), Paragraph("Normal 3-shunt FOC with Sliding Mode Observer angle feedback.", styles['TableCell']), Paragraph("Single fault isolated $\\to$ DEGRADED (Mode 3)", styles['TableCell'])],
-        [Paragraph("<b>Mode 3</b>", styles['TableCellCenter']), Paragraph("<b>DEGRADED</b>", styles['TableCellBold']), Paragraph("Fail-operational 2-shunt mode; missing phase reconstructed.", styles['TableCell']), Paragraph("Second fault detected $\\to$ SAFE_STOP (Mode 5)", styles['TableCell'])],
-        [Paragraph("<b>Mode 4</b>", styles['TableCellCenter']), Paragraph("<b>LIMP</b>", styles['TableCellBold']), Paragraph("Unresolved ambiguous fault; speed and current limits reduced 50%.", styles['TableCell']), Paragraph("Timeout $> 200\\text{ ms} \\to$ SAFE_STOP (Mode 5)", styles['TableCell'])],
+        [Paragraph("<b>Mode 0</b>", styles['TableCellCenter']), Paragraph("<b>ALIGN</b>", styles['TableCellBold']), Paragraph("Injects DC current into Phase A for 500 ms; holds rotor at 0°.", styles['TableCell']), Paragraph("500 ms timer expires → OPEN_LOOP_RAMP", styles['TableCell'])],
+        [Paragraph("<b>Mode 1</b>", styles['TableCellCenter']), Paragraph("<b>OPEN_LOOP_RAMP</b>", styles['TableCellBold']), Paragraph("Synthesizes rotating I-F vector, accelerating from 0 to 500 RPM.", styles['TableCell']), Paragraph("Speed = 500 RPM & lock &lt; 15° → CLOSED_LOOP", styles['TableCell'])],
+        [Paragraph("<b>Mode 2</b>", styles['TableCellCenter']), Paragraph("<b>CLOSED_LOOP</b>", styles['TableCellBold']), Paragraph("Normal 3-shunt FOC with Sliding Mode Observer angle feedback.", styles['TableCell']), Paragraph("Single fault isolated → DEGRADED (Mode 3)", styles['TableCell'])],
+        [Paragraph("<b>Mode 3</b>", styles['TableCellCenter']), Paragraph("<b>DEGRADED</b>", styles['TableCellBold']), Paragraph("Fail-operational 2-shunt mode; missing phase reconstructed.", styles['TableCell']), Paragraph("Second fault detected → SAFE_STOP (Mode 5)", styles['TableCell'])],
+        [Paragraph("<b>Mode 4</b>", styles['TableCellCenter']), Paragraph("<b>LIMP</b>", styles['TableCellBold']), Paragraph("Unresolved ambiguous fault; speed and current limits reduced 50%.", styles['TableCell']), Paragraph("Timeout &gt; 200 ms → SAFE_STOP (Mode 5)", styles['TableCell'])],
         [Paragraph("<b>Mode 5</b>", styles['TableCellCenter']), Paragraph("<b>SAFE_STOP</b>", styles['TableCellBold']), Paragraph("Catastrophic shutdown; inverter gates disabled (`PIN_GATE_EN = 0`).", styles['TableCell']), Paragraph("Terminal latch; requires full MCU power cycle.", styles['TableCell'])],
     ]
     t_fsm = Table(fsm_data, colWidths=[60, 110, 210, 160])
@@ -571,7 +612,7 @@ def build_pdf():
         [Paragraph("5", styles['TableCellCenter']), Paragraph("<b>Sensor A Stuck Zero</b>", styles['TableCellBold']), Paragraph("Sensor A output freezes at 0.0 A at t=2.0s.", styles['TableCell']), Paragraph("Detect zero-variance, isolate A, 2-shunt handoff.", styles['TableCell']), Paragraph("<font color='#15803D'><b>PASS</b></font>", styles['TableCellCenter'])],
         [Paragraph("6", styles['TableCellCenter']), Paragraph("<b>Inverter Leg A Open</b>", styles['TableCellBold']), Paragraph("Phase A inverter leg disconnects (0 current).", styles['TableCell']), Paragraph("Severe residual, latch SAFE_STOP within 50 ms.", styles['TableCell']), Paragraph("<font color='#15803D'><b>PASS</b></font>", styles['TableCellCenter'])],
         [Paragraph("7", styles['TableCellCenter']), Paragraph("<b>Handoff / Alignment</b>", styles['TableCellBold']), Paragraph("Standstill DC align to 500 RPM I-F ramp.", styles['TableCell']), Paragraph("Observer locks < 15°, handoff to CLOSED_LOOP clean.", styles['TableCell']), Paragraph("<font color='#15803D'><b>PASS</b></font>", styles['TableCellCenter'])],
-        [Paragraph("8", styles['TableCellCenter']), Paragraph("<b>Parameter Mismatch</b>", styles['TableCellBold']), Paragraph("Motor $R_s, L_s$ detuned by $\pm 20\%$.", styles['TableCell']), Paragraph("Observer maintains lock, angle error < 25°, stable.", styles['TableCell']), Paragraph("<font color='#15803D'><b>PASS</b></font>", styles['TableCellCenter'])],
+        [Paragraph("8", styles['TableCellCenter']), Paragraph("<b>Parameter Mismatch</b>", styles['TableCellBold']), Paragraph("Motor R<sub>s</sub>, L<sub>s</sub> detuned by ±20%.", styles['TableCell']), Paragraph("Observer maintains lock, angle error < 25°, stable.", styles['TableCell']), Paragraph("<font color='#15803D'><b>PASS</b></font>", styles['TableCellCenter'])],
         [Paragraph("9", styles['TableCellCenter']), Paragraph("<b>Speed Reversal</b>", styles['TableCellBold']), Paragraph("Speed step from +2000 to -2000 RPM.", styles['TableCell']), Paragraph("Smooth zero-speed crossing, 4-quadrant stability.", styles['TableCell']), Paragraph("<font color='#15803D'><b>PASS</b></font>", styles['TableCellCenter'])],
         [Paragraph("10", styles['TableCellCenter']), Paragraph("<b>Torque Step (+0.5Nm)</b>", styles['TableCellBold']), Paragraph("Sudden mechanical load applied at t=2.5s.", styles['TableCell']), Paragraph("Speed dip < 5%, recovery < 80 ms, PI anti-windup.", styles['TableCell']), Paragraph("<font color='#15803D'><b>PASS</b></font>", styles['TableCellCenter'])],
         [Paragraph("11", styles['TableCellCenter']), Paragraph("<b>Two-Phase Startup</b>", styles['TableCellBold']), Paragraph("Sensor A disconnected before startup.", styles['TableCell']), Paragraph("Starts directly in 2-shunt mode, reaches 2000 RPM.", styles['TableCell']), Paragraph("<font color='#15803D'><b>PASS</b></font>", styles['TableCellCenter'])],
@@ -599,8 +640,8 @@ def build_pdf():
     story.append(Paragraph(
         "<b>Scenario 0 (Healthy Baseline Operation):</b><br/>"
         "Under nominal conditions with all three shunts healthy, the motor accelerates smoothly through ALIGN and I-F ramp into Mode 2 (`CLOSED_LOOP`). "
-        "At 2000 RPM, the Sliding Mode Observer tracks physical rotor angle within 3.75° RMS ($< 6.2^\circ$ peak). "
-        "Speed ripple is negligible ($< 0.5\\%$) and the health score remains at 100%.",
+        "At 2000 RPM, the Sliding Mode Observer tracks physical rotor angle within 3.75° RMS (&lt; 6.2° peak). "
+        "Speed ripple is negligible (&lt; 0.5%) and the health score remains at 100%.",
         styles['BodyLayman']
     ))
     story.append(Spacer(1, 4))
@@ -612,10 +653,10 @@ def build_pdf():
 
     story.append(Paragraph(
         "<b>Scenario 2 (Phase A +2.0A Current Offset):</b><br/>"
-        "At $t = 2.0\\text{ s}$, a sudden $+2.0\\text{ A}$ current bias is injected into Sensor A. "
-        "Within 1 sample, the KCL residual $r_{KCL}$ spikes from 0.05 A to 2.0 A. "
+        "At t = 2.0 s, a sudden +2.0 A current bias is injected into Sensor A. "
+        "Within 1 sample, the KCL residual <i>r<sub>KCL</sub></i> spikes from 0.05 A to 2.0 A. "
         "The hypothesis evaluator confirms that Sensor A is the corrupt channel, isolates it within 15 ms, and transitions to Mode 3 (`DEGRADED`). "
-        "Phase A is reconstructed via $i_a = -(i_b + i_c)$ with 0.052 A RMS error. <b>Notice that speed does not dip at all!</b>",
+        "Phase A is reconstructed via <i>i<sub>a</sub></i> = -(<i>i<sub>b</sub></i> + <i>i<sub>c</sub></i>) with 0.052 A RMS error. <b>Notice that speed does not dip at all!</b>",
         styles['BodyLayman']
     ))
     story.append(Spacer(1, 4))
@@ -632,9 +673,9 @@ def build_pdf():
     story.append(Paragraph("6.2 Stuck Sensors & 4-Quadrant Speed Reversals (Scenarios 3 & 8)", styles['SectionHeader']))
     story.append(Paragraph(
         "<b>Scenario 3 (Phase B Stuck-at-Zero Sensor Fault):</b><br/>"
-        "At $t = 2.0\\text{ s}$, Sensor B freezes at a constant $0.0\\text{ A}$ while the motor is spinning at 2000 RPM. "
+        "At t = 2.0 s, Sensor B freezes at a constant 0.0 A while the motor is spinning at 2000 RPM. "
         "Because an AC motor phase current must oscillate continuously, a frozen sensor exhibits <b>zero variance over time</b>. "
-        "The stuck-sensor heuristic detects this variance collapse within 15 ms, isolates Sensor B, and hands off to 2-shunt reconstruction ($i_b = -(i_a + i_c)$).",
+        "The stuck-sensor heuristic detects this variance collapse within 15 ms, isolates Sensor B, and hands off to 2-shunt reconstruction (<i>i<sub>b</sub></i> = -(<i>i<sub>a</sub></i> + <i>i<sub>c</sub></i>)).",
         styles['BodyLayman']
     ))
     story.append(Spacer(1, 4))
@@ -646,7 +687,7 @@ def build_pdf():
 
     story.append(Paragraph(
         "<b>Scenario 8 (4-Quadrant Full Speed Reversal):</b><br/>"
-        "At $t = 2.0\\text{ s}$, speed reference steps from $+2000\\text{ RPM}$ to $-2000\\text{ RPM}$. "
+        "At t = 2.0 s, speed reference steps from +2000 RPM to -2000 RPM. "
         "This tests active regenerative braking, crossing through zero speed (0 RPM), and accelerating in reverse. "
         "Even though Back-EMF temporarily vanishes at 0 RPM, the observer phase-locked loop (PLL) tracks through zero crossing smoothly without losing synchronism!",
         styles['BodyLayman']
@@ -665,9 +706,9 @@ def build_pdf():
     story.append(Paragraph("6.3 Load Shock & High-Frequency Noise Immunity (Scenarios 9 & 6)", styles['SectionHeader']))
     story.append(Paragraph(
         "<b>Scenario 9 (Dynamic Load Torque Step):</b><br/>"
-        "At $t = 1.5\\text{ s}$, a sudden mechanical load torque of $+0.10\\text{ N}\\cdot\\text{m}$ (equal to rated full load) is applied to the rotor shaft. "
-        "The PI speed and current controllers react instantaneously, increasing $i_q$ to supply the required torque. "
-        "Speed dips by less than 2% ($< 40\\text{ RPM}$) and completely recovers within 60 ms with zero observer instability.",
+        "At t = 1.5 s, a sudden mechanical load torque of +0.10 N·m (equal to rated full load) is applied to the rotor shaft. "
+        "The PI speed and current controllers react instantaneously, increasing <i>i<sub>q</sub></i> to supply the required torque. "
+        "Speed dips by less than 2% (&lt; 40 RPM) and completely recovers within 60 ms with zero observer instability.",
         styles['BodyLayman']
     ))
     story.append(Spacer(1, 4))
@@ -679,7 +720,7 @@ def build_pdf():
 
     story.append(Paragraph(
         "<b>Scenario 6 (High-Frequency Noise Burst Rejection):</b><br/>"
-        "Injects continuous $2.0\\text{ A}$ high-frequency noise bursts onto Phase A to simulate severe electromagnetic interference (EMI). "
+        "Injects continuous 2.0 A high-frequency noise bursts onto Phase A to simulate severe electromagnetic interference (EMI). "
         "The multi-tier debounce filter averages out the high-frequency content, maintaining healthy `CLOSED_LOOP` operation (Mode 2) without false isolation tripping.",
         styles['BodyLayman']
     ))
@@ -697,8 +738,8 @@ def build_pdf():
     story.append(Paragraph("6.4 Sequential Two-Sensor Faults & Safe Stop Dynamics (Scenario 13)", styles['SectionHeader']))
     story.append(Paragraph(
         "<b>Scenario 13 (Sequential Two-Sensor Failure):</b><br/>"
-        "Sensor A develops a $+2.0\\text{ A}$ offset at $t = 1.5\\text{ s}$, which the controller isolates cleanly into 2-shunt mode. "
-        "At $t = 2.0\\text{ s}$, Sensor B develops an offset as well. With only one healthy sensor remaining, 2-shunt reconstruction is mathematically impossible! "
+        "Sensor A develops a +2.0 A offset at t = 1.5 s, which the controller isolates cleanly into 2-shunt mode. "
+        "At t = 2.0 s, Sensor B develops an offset as well. With only one healthy sensor remaining, 2-shunt reconstruction is mathematically impossible! "
         "The observer residual spikes above 1.2 A, and the controller latches <b>SAFE_STOP (Mode 5)</b> within 50 ms.",
         styles['BodyLayman']
     ))
@@ -712,7 +753,7 @@ def build_pdf():
     story.append(Paragraph(
         "<b>Post-Safe-Stop Physical Circuit Protection:</b><br/>"
         "When gates are disabled (`PIN_GATE_EN = 0`), phase currents freewheel through MOSFET body diodes. "
-        "Notice that peak phase current stays strictly below $1.2 \\times I_n$ (6.0 A), and the DC bus voltage rises gently from 24.0 V to 24.45 V before decaying via the bleeder resistor.",
+        "Notice that peak phase current stays strictly below 1.2 × <i>I<sub>n</sub></i> (6.0 A), and the DC bus voltage rises gently from 24.0 V to 24.45 V before decaying via the bleeder resistor.",
         styles['BodyLayman']
     ))
     story.append(Spacer(1, 4))
@@ -740,13 +781,13 @@ def build_pdf():
         [Paragraph("<b>Layer / File</b>", styles['TableHeader']), Paragraph("<b>Primary Function & Technical Responsibility</b>", styles['TableHeader']), Paragraph("<b>Key Functions / Symbols</b>", styles['TableHeader'])],
         [Paragraph("<b>src/foc_core.c</b>", styles['TableCellBold']), Paragraph("Core execution engine of the FOC algorithm. Executes Clarke and Park transforms, calls PI current loops, runs Inverse Park, calculates Space Vector PWM duty cycles, and coordinates observers.", styles['TableCell']), Paragraph("`foc_init()`, `foc_tick()`, `foc_get_default_controller_params()`", styles['TableCell'])],
         [Paragraph("<b>src/fault_monitor.c</b>", styles['TableCellBold']), Paragraph("The intelligence center for fault detection. Computes the KCL residual, evaluates 3-shunt candidate hypotheses, implements the multi-tier debounce filter, and manages 2-shunt current reconstruction.", styles['TableCell']), Paragraph("`fault_monitor_update()`, `fault_monitor_reconstruct_currents()`, `KCL_CONSECUTIVE_LIMIT`", styles['TableCell'])],
-        [Paragraph("<b>src/smo.c</b>", styles['TableCellBold']), Paragraph("Sliding Mode Observer. Models stator differential equations and uses switching functions (sign / continuous sigmoid) to slide current error to zero, extracting Back-EMF $(\hat{e}_\\alpha, \hat{e}_\\beta)$.", styles['TableCell']), Paragraph("`smo_update()`, `smo_get_angle()`, `smo_get_speed()`", styles['TableCell'])],
+        [Paragraph("<b>src/smo.c</b>", styles['TableCellBold']), Paragraph("Sliding Mode Observer. Models stator differential equations and uses switching functions (sign / continuous sigmoid) to slide current error to zero, extracting Back-EMF (<i>ê<sub>α</sub></i>, <i>ê<sub>β</sub></i>).", styles['TableCell']), Paragraph("`smo_update()`, `smo_get_angle()`, `smo_get_speed()`", styles['TableCell'])],
         [Paragraph("<b>src/flux_observer.c</b>", styles['TableCellBold']), Paragraph("Stator flux linkage observer. Integrates terminal voltage minus IR drops to track steady-state rotor flux with high noise rejection during smooth cruising.", styles['TableCell']), Paragraph("`flux_observer_update()`, `flux_observer_get_angle()`", styles['TableCell'])],
         [Paragraph("<b>src/observer_manager.c</b>", styles['TableCellBold']), Paragraph("Cross-validation supervisor. Compares SMO and Flux Observer outputs, calculates angle confidence scores, and detects observer divergence.", styles['TableCell']), Paragraph("`observer_manager_update()`, `observer_manager_get_best_angle()`", styles['TableCell'])],
-        [Paragraph("<b>src/handoff.c</b>", styles['TableCellBold']), Paragraph("State machine governing startup transitions: ALIGN (0) $\to$ OPEN_LOOP_RAMP (1) $\to$ CLOSED_LOOP (2) $\to$ DEGRADED (3) $\to$ LIMP (4) $\to$ SAFE_STOP (5).", styles['TableCell']), Paragraph("`handoff_update()`, `handoff_request_mode()`", styles['TableCell'])],
+        [Paragraph("<b>src/handoff.c</b>", styles['TableCellBold']), Paragraph("State machine governing startup transitions: ALIGN (0) → OPEN_LOOP_RAMP (1) → CLOSED_LOOP (2) → DEGRADED (3) → LIMP (4) → SAFE_STOP (5).", styles['TableCell']), Paragraph("`handoff_update()`, `handoff_request_mode()`", styles['TableCell'])],
         [Paragraph("<b>src/if_startup.c</b>", styles['TableCellBold']), Paragraph("I-F startup ramp generator. Synthesizes an open-loop rotating current vector to accelerate the motor from standstill to 500 RPM where Back-EMF becomes measurable.", styles['TableCell']), Paragraph("`if_startup_init()`, `if_startup_step()`", styles['TableCell'])],
-        [Paragraph("<b>src/pi_controller.c</b>", styles['TableCellBold']), Paragraph("Discrete Proportional-Integral controllers with integral anti-windup clamping for the $i_d$ flux loop, $i_q$ torque loop, and outer speed loop.", styles['TableCell']), Paragraph("`pi_controller_update()`, `pi_controller_reset()`", styles['TableCell'])],
-        [Paragraph("<b>src/motor_params.h</b>", styles['TableCellBold']), Paragraph("Canonical hardware parameters: stator resistance $R_s$, inductance $L_s$, flux constant $\\psi_f$, inertia $J$, bus voltage $V_{bus}$, and compile-time dead-time safety warning.", styles['TableCell']), Paragraph("`CTRL_PARAM_DEAD_TIME`, `DEAD_TIME_COMMISSIONED_S`", styles['TableCell'])],
+        [Paragraph("<b>src/pi_controller.c</b>", styles['TableCellBold']), Paragraph("Discrete Proportional-Integral controllers with integral anti-windup clamping for the <i>i<sub>d</sub></i> flux loop, <i>i<sub>q</sub></i> torque loop, and outer speed loop.", styles['TableCell']), Paragraph("`pi_controller_update()`, `pi_controller_reset()`", styles['TableCell'])],
+        [Paragraph("<b>src/motor_params.h</b>", styles['TableCellBold']), Paragraph("Canonical hardware parameters: stator resistance <i>R<sub>s</sub></i>, inductance <i>L<sub>s</sub></i>, flux constant <i>ψ<sub>f</sub></i>, inertia <i>J</i>, bus voltage <i>V<sub>bus</sub></i>, and compile-time dead-time safety warning.", styles['TableCell']), Paragraph("`CTRL_PARAM_DEAD_TIME`, `DEAD_TIME_COMMISSIONED_S`", styles['TableCell'])],
     ]
     t_code = Table(code_data, colWidths=[120, 260, 160])
     t_code.setStyle(TableStyle([
@@ -778,7 +819,7 @@ def build_pdf():
         [Paragraph("<b>simulation/harness/sil_runner.py</b>", styles['TableCellBold']), Paragraph("Python/C SIL simulation harness. Solves continuous PMSM differential equations via 4th-order Runge-Kutta, simulates PWM voltage switching, MOSFET body diodes, and DC bus dynamics.", styles['TableCell']), Paragraph("`SILRunner.run()`, `SimulationResult`", styles['TableCell'])],
         [Paragraph("<b>simulation/harness/metrics.py</b>", styles['TableCellBold']), Paragraph("ISO/IEC physical acceptance criteria evaluation. Evaluates RMS angle error, speed ripple, fault detection latency, recovery duration, and current reconstruction error.", styles['TableCell']), Paragraph("`evaluate_scenario()`", styles['TableCell'])],
         [Paragraph("<b>simulation/plant/pmsm_model.py</b>", styles['TableCellBold']), Paragraph("Continuous 4-state physical ODE plant: solves stator d-q equations with cross-coupling, Back-EMF, Newton-Euler rotor mechanics, and 6th-harmonic cogging torque.", styles['TableCell']), Paragraph("`PMSMModel.step()`, `PMSMModel.get_state()`", styles['TableCell'])],
-        [Paragraph("<b>simulation/plant/bldc_model.py</b>", styles['TableCellBold']), Paragraph("120° trapezoidal BLDC motor plant solver: models floating star neutral voltage ($v_n = \\frac{1}{3}\\sum(v_k - e_k)$) and strict KCL conservation.", styles['TableCell']), Paragraph("`BLDCModel.step()`", styles['TableCell'])],
+        [Paragraph("<b>simulation/plant/bldc_model.py</b>", styles['TableCellBold']), Paragraph("120° trapezoidal BLDC motor plant solver: models floating star neutral voltage (<i>v<sub>n</sub></i> = ⅓ ∑(<i>v<sub>k</sub></i> - <i>e<sub>k</sub></i>)) and strict KCL conservation.", styles['TableCell']), Paragraph("`BLDCModel.step()`", styles['TableCell'])],
     ]
     t_code_2 = Table(code_data_2, colWidths=[130, 250, 160])
     t_code_2.setStyle(TableStyle([
@@ -824,13 +865,13 @@ def build_pdf():
         [Paragraph("<b>test_handoff.py</b>", styles['TableCellBold']), Paragraph("8 tests", styles['TableCellCenter']), Paragraph("Validates ALIGN to OPEN_LOOP to CLOSED_LOOP state machine; tests fault injection during ALIGN and OPEN_LOOP at 0.5A, 1.0A, and 2.0A; verifies observer angle lock criteria (< 15°) and stall fallback.", styles['TableCell'])],
         [Paragraph("<b>test_dead_time_sensitivity.py</b>", styles['TableCellBold']), Paragraph("8 tests", styles['TableCellCenter']), Paragraph("Sweeps plant dead-time distortion (0.0V, 0.25V, 0.5V, 1.0V, 1.5V) against controller; verifies safe firmware default (0.0s) and explicit SIL benchmark constant (`SIM_DEAD_TIME`).", styles['TableCell'])],
         [Paragraph("<b>test_bldc.py</b>", styles['TableCellBold']), Paragraph("6 tests", styles['TableCellCenter']), Paragraph("Validates compatibility with trapezoidal BLDC Back-EMF motors; tests 120° commutation harmonics, KCL conservation under trapezoidal waveforms, and closed-loop FOC torque ripple.", styles['TableCell'])],
-        [Paragraph("<b>test_plant.py</b>", styles['TableCellBold']), Paragraph("5 tests", styles['TableCellCenter']), Paragraph("Validates continuous PMSM physical plant ODE solver: standstill behavior, torque acceleration, steady-state current equilibrium, Clarke/Park invertibility ($< 10^{-5}$ error).", styles['TableCell'])],
+        [Paragraph("<b>test_plant.py</b>", styles['TableCellBold']), Paragraph("5 tests", styles['TableCellCenter']), Paragraph("Validates continuous PMSM physical plant ODE solver: standstill behavior, torque acceleration, steady-state current equilibrium, Clarke/Park invertibility (&lt; 10⁻⁵ error).", styles['TableCell'])],
         [Paragraph("<b>test_sequential_fault_gaps.py</b>", styles['TableCellBold']), Paragraph("4 tests", styles['TableCellCenter']), Paragraph("Tests sequential two-sensor faults with variable inter-fault timing gaps (20 ms, 50 ms, 100 ms); verifies second-fault detection and latching of SAFE_STOP during dynamic speed-step transients.", styles['TableCell'])],
         [Paragraph("<b>test_decel.py</b>", styles['TableCellBold']), Paragraph("3 tests", styles['TableCellCenter']), Paragraph("Verifies that single-sensor fault operation remains in DEGRADED mode during aggressive braking from 2000 RPM down to 1000 RPM, 500 RPM, and full reversal to -2000 RPM without losing observer lock.", styles['TableCell'])],
-        [Paragraph("<b>test_current_sense.py</b>", styles['TableCellBold']), Paragraph("2 tests", styles['TableCellCenter']), Paragraph("Validates current shunt scaling ($I_{scale} > 1.2 \\times I_n$); verifies that ADC quantization noise and DC offset calibration do not trigger false KCL exceedances.", styles['TableCell'])],
+        [Paragraph("<b>test_current_sense.py</b>", styles['TableCellBold']), Paragraph("2 tests", styles['TableCellCenter']), Paragraph("Validates current shunt scaling (<i>I<sub>scale</sub></i> &gt; 1.2 × <i>I<sub>n</sub></i>); verifies that ADC quantization noise and DC offset calibration do not trigger false KCL exceedances.", styles['TableCell'])],
         [Paragraph("<b>test_hal_benchmark.py</b>", styles['TableCellBold']), Paragraph("2 tests", styles['TableCellCenter']), Paragraph("Simulates 10,000 continuous control ticks to verify real-time execution timing; verifies zero `-Wdouble-promotion` compiler warnings across the entire C codebase.", styles['TableCell'])],
-        [Paragraph("<b>test_safe_stop_current.py</b>", styles['TableCellBold']), Paragraph("1 test", styles['TableCellCenter']), Paragraph("Validates gate-off body-diode conduction at 2000 RPM; asserts peak phase current stays below $1.2 \\times I_n$ (6.0 A); verifies quantitative exponential decay of DC bus capacitor voltage.", styles['TableCell'])],
-        [Paragraph("<b>test_voltage_limiting.py</b>", styles['TableCellBold']), Paragraph("1 test", styles['TableCellCenter']), Paragraph("Tests SVPWM duty cycle clamping to $[0.0, 1.0]$; verifies voltage saturation behavior during extreme speed and torque commands.", styles['TableCell'])],
+        [Paragraph("<b>test_safe_stop_current.py</b>", styles['TableCellBold']), Paragraph("1 test", styles['TableCellCenter']), Paragraph("Validates gate-off body-diode conduction at 2000 RPM; asserts peak phase current stays below 1.2 × <i>I<sub>n</sub></i> (6.0 A); verifies quantitative exponential decay of DC bus capacitor voltage.", styles['TableCell'])],
+        [Paragraph("<b>test_voltage_limiting.py</b>", styles['TableCellBold']), Paragraph("1 test", styles['TableCellCenter']), Paragraph("Tests SVPWM duty cycle clamping to [0.0, 1.0]; verifies voltage saturation behavior during extreme speed and torque commands.", styles['TableCell'])],
     ]
     t_suite = Table(test_suite_data, colWidths=[125, 60, 355])
     t_suite.setStyle(TableStyle([
@@ -853,17 +894,17 @@ def build_pdf():
     story.append(HRFlowable(width="100%", thickness=1.2, color=C_PRIMARY, spaceAfter=8))
 
     glossary_items = [
-        ("FOC (Field-Oriented Control)", "A vector control technique that coordinates AC motor currents into two constant DC components: one for magnetic flux ($i_d$) and one for pure mechanical torque ($i_q$)."),
+        ("FOC (Field-Oriented Control)", "A vector control technique that coordinates AC motor currents into two constant DC components: one for magnetic flux (<i>i<sub>d</sub></i>) and one for pure mechanical torque (<i>i<sub>q</sub></i>)."),
         ("PMSM", "Permanent Magnet Synchronous Motor — an AC motor whose rotor carries permanent magnets and rotates in exact synchronism with the stator's rotating magnetic field."),
         ("BLDC", "Brushless Direct Current Motor — similar to PMSM, but wound for trapezoidal Back-EMF and traditionally driven by 6-step block commutation."),
         ("Back-EMF", "Back-Electromotive Force: the voltage generated inside motor coils when permanent magnets spin past them. Used as a 'virtual sensor' to deduce rotor angle."),
-        ("Clarke Transform", "A mathematical formula that converts 3-phase AC currents ($i_a, i_b, i_c$) into two stationary orthogonal coordinates ($i_\\alpha, i_\\beta$)."),
-        ("Park Transform", "A mathematical formula that rotates coordinates along with the rotor, transforming oscillating $(\\alpha, \\beta)$ signals into flat DC $(d, q)$ values."),
+        ("Clarke Transform", "A mathematical formula that converts 3-phase AC currents (<i>i<sub>a</sub></i>, <i>i<sub>b</sub></i>, <i>i<sub>c</sub></i>) into two stationary orthogonal coordinates (<i>i<sub>α</sub></i>, <i>i<sub>β</sub></i>)."),
+        ("Park Transform", "A mathematical formula that rotates coordinates along with the rotor, transforming oscillating (<i>α</i>, <i>β</i>) signals into flat DC (<i>d</i>, <i>q</i>) values."),
         ("SVPWM", "Space Vector Pulse-Width Modulation — an advanced technique for switching inverter MOSFETs that extracts 15.5% more voltage from a battery than standard sinusoidal PWM."),
         ("SMO (Sliding Mode Observer)", "A robust mathematical observer that forces a software model of the motor to track real currents, exposing the Back-EMF voltages needed for sensorless angle tracking."),
-        ("KCL (Kirchhoff's Current Law)", "A fundamental law of physics stating that the sum of all currents entering a node must equal zero. In a motor: $i_a + i_b + i_c = 0$."),
+        ("KCL (Kirchhoff's Current Law)", "A fundamental law of physics stating that the sum of all currents entering a node must equal zero. In a motor: <i>i<sub>a</sub></i> + <i>i<sub>b</sub></i> + <i>i<sub>c</sub></i> = 0."),
         ("Dead-Time", "A brief microsecond blanking pause inserted between turning off one MOSFET and turning on another in the same leg to prevent a dead-short across the power supply (shoot-through)."),
-        ("2-Shunt Degraded Mode", "A fault-tolerant mode where one broken current sensor is discarded and its current is reconstructed mathematically from the remaining two healthy sensors ($i_a = -(i_b + i_c)$).")
+        ("2-Shunt Degraded Mode", "A fault-tolerant mode where one broken current sensor is discarded and its current is reconstructed mathematically from the remaining two healthy sensors (<i>i<sub>a</sub></i> = -(<i>i<sub>b</sub></i> + <i>i<sub>c</sub></i>)).")
     ]
 
     gloss_data = [[Paragraph("<b>Term</b>", styles['TableHeader']), Paragraph("<b>Plain-English Definition & Physical Function</b>", styles['TableHeader'])]]
@@ -922,14 +963,14 @@ def build_pdf():
         "<b>Engineering Conclusion:</b><br/>"
         "By marrying high-speed mathematical transformations (Clarke/Park), digital twin observers (SMO/Flux), "
         "physical power electronics protections (dead-time compensation, body diode conduction, DC bus capacitor discharge), "
-        "and robust Kirchhoff-based hypothesis testing, this repository demonstrates that low-cost microcontrollers ($<\$5$) "
+        "and robust Kirchhoff-based hypothesis testing, this repository demonstrates that low-cost microcontrollers (under $5) "
         "like the ESP32 can deliver mission-critical, fail-operational motor control previously reserved for aerospace hardware."
     )
     story.append(callout_box("ENGINEERING CONCLUSION", conclusion_text, styles, border_color=C_PRIMARY, bg_color=colors.HexColor('#EFF6FF')))
 
     # Build Document
     doc.build(story, canvasmaker=NumberedCanvas)
-    print(f"Successfully compiled spacious, unconstrained PDF guide to: {PDF_OUTPUT_PATH}")
+    print(f"Successfully compiled clean, LaTeX-free PDF guide to: {PDF_OUTPUT_PATH}")
 
 if __name__ == "__main__":
     build_pdf()
