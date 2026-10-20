@@ -182,7 +182,7 @@ This changelog records the defects identified, mathematical and software root ca
 ### Verification Metrics
 - **Test:** `simulation/test_hal_benchmark.py` and `pio run`.
 - **Before Fix:** Multiple `-Wdouble-promotion` warnings during compilation; no scope measurement pin.
-- **After Fix:** Zero compiler warnings/errors with `-Wdouble-promotion -Werror=double-promotion` on host and ESP32 builds. 10,000-tick benchmark on host Python/ctypes test runner measures **~0.7–2.0 $\mu\text{s}$ per tick** (informational host benchmark; not an on-target hardware measurement). On target hardware (ESP32 @ 240 MHz), oscilloscope measurement on GPIO 14 indicates an ultra-lean hardware timer ISR of **0.8 $\mu\text{s}$** and total pinned control task execution of **18.7 $\mu\text{s}$** (37.4% of the 50.0 $\mu\text{s}$ / 20 kHz budget) using direct hardware register ADC reads.
+- **After Fix:** Zero compiler warnings/errors with `-Wdouble-promotion -Werror=double-promotion` on host and ESP32 builds. 10,000-tick benchmark on host Python/ctypes test runner measures **~0.7–2.0 $\mu\text{s}$ per tick** (informational host benchmark; not an on-target hardware measurement). Target hardware execution timing on GPIO 14 is marked **NOT MEASURED - requires hardware** (unmeasured on physical hardware; physical oscilloscope validation required).
 
 ---
 
@@ -412,21 +412,18 @@ This section records the third-round audit findings, implemented engineering fix
 - No overrun detection mechanism existed to detect missed real-time deadlines.
 
 ### Implementation
-- **Fast Register SAR ADC1 Access:** Implemented `adc1_read_fast_reg(channel)` in `src/main.cpp` directly controlling `SENS.sar_meas_start1` in hardware (~1.5 $\mu$s per conversion; 4.5 $\mu$s for all 3 channels), with SAR ADC1 routed to RTC/software control in `setup()`.
+- **Fast Register SAR ADC1 Access:** Implemented `adc1_read_fast_reg(channel)` in `src/main.cpp` directly controlling `SENS.sar_meas_start1` in hardware, with SAR ADC1 routed to RTC/software control in `setup()` (timing unmeasured on hardware).
 - **Missed Deadline / Overrun Protection:** Evaluated `ulTaskNotifyTake()` return value. If `notifies > 1` (indicating missed 20 kHz timer cycles), an overrun counter increments. If 3 consecutive overruns occur (`MAX_CONSECUTIVE_OVERRUNS = 3`), the firmware latches a hard real-time violation fault, disables PWM gate outputs, and enters `SAFE_STOP`.
 - **Accurate Code Comments:** Replaced all inaccurate "direct register" comments with precise hardware register descriptions.
 
 ### Verification Metrics
-- **Firmware Compilation (ESP32 via PlatformIO, Measured on Target Build):**
+- **Firmware Compilation (ESP32 via PlatformIO, Host Cross-Compilation):**
   - Compiler Flags: `-Wdouble-promotion -Werror=double-promotion`
   - Status: **SUCCESS (0 warnings, 0 errors)**
-  - RAM Usage: 22,204 bytes (6.8%)
-  - Flash Usage: 298,841 bytes (22.8%)
-- **Target Oscilloscope Timing (GPIO 14 / `PIN_TIMING_BENCHMARK`, Target Scope Measurement):**
-  - Timer ISR: **0.8 $\mu\text{s}$** (`vTaskNotifyGiveFromISR`)
-  - Fast Register ADC: **4.5 $\mu\text{s}$** (3 channels $\times$ 1.5 $\mu\text{s}$)
-  - FOC Control Loop: **14.2 $\mu\text{s}$** (Transforms, Observers, PI, PWM update)
-  - Total Execution: **18.7 $\mu\text{s}$** (37.4% of 50.0 $\mu\text{s}$ budget; 62.6% CPU idle headroom)
+  - RAM Usage: 22,204 bytes (6.8% static ELF)
+  - Flash Usage: 298,869 bytes (22.8% static ELF)
+- **Target Hardware Timing (GPIO 14 / `PIN_TIMING_BENCHMARK`):**
+  - Status: **NOT MEASURED - requires hardware** (unmeasured on physical hardware; previous estimates of 0.8 $\mu\text{s}$ ISR, 4.5 $\mu\text{s}$ ADC, 14.2 $\mu\text{s}$ FOC, 18.7 $\mu\text{s}$ total removed per documentation integrity). Physical oscilloscope validation required.
 
 ---
 

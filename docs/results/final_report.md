@@ -279,20 +279,20 @@ The repository includes a complete Simulink co-simulation environment in `simuli
 ### Embedded PlatformIO Firmware Build
 - **Platform:** Espressif 32 (ESP32 Dev Module, 240 MHz Xtensa LX6)
 - **Compilation Flags:** `-I src -Wdouble-promotion -Werror=double-promotion`
-- **RAM Usage:** 22,364 bytes (6.8% of 320 KB)
-- **Flash Usage:** 300,957 bytes (23.0% of 1.3 MB)
-- **Compilation Time:** 0.88 seconds
 - **Compiler Warnings:** **0 warnings, 0 errors** under `-Wdouble-promotion`
-- **Result:** **SUCCESS**
+- **Static Firmware Image Size (Host Cross-Compilation):**
+  - RAM Usage: 22,204 bytes (6.8% of 320 KB)
+  - Flash Usage: 298,869 bytes (22.8% of 1.3 MB)
+- **On-Target Execution:** **NOT MEASURED - requires hardware** (cross-compilation verified on host; on-target flashing and physical execution profiling require hardware)
+- **Result:** **SUCCESS (Host Cross-Compilation)**
 
 ### Performance Profiling & Timing Budget
 - **10,000-Tick Host Ctypes Benchmark:** Average execution time **~0.7–2.0 µs per tick** on host Python/ctypes test runner (informational host benchmark; not an on-target hardware measurement).
-- **Embedded FreeRTOS Architecture:** On ESP32, the full FOC loop runs inside a dedicated high-priority FreeRTOS task pinned to Core 1. The hardware timer ISR is ultra-lean (<1 µs notification overhead via `vTaskNotifyGiveFromISR`). Shared telemetry is protected by a fine-grained spinlock (~15 ns).
+- **Embedded FreeRTOS Architecture:** On ESP32, the full FOC loop runs inside a dedicated high-priority FreeRTOS task pinned to Core 1. The hardware timer ISR provides lean notification overhead via `vTaskNotifyGiveFromISR`. Shared telemetry is protected by a fine-grained spinlock (~15 ns).
 - **Target Hardware Scope Measurements (GPIO 14 / `PIN_TIMING_BENCHMARK`):**
-  - Timer ISR execution time: **0.8 µs** (`vTaskNotifyGiveFromISR`)
-  - Direct Hardware Register ADC reads (3 channels $\times$ 1.5 µs via `SENS.sar_meas_start1`): **4.5 µs**
-  - Control loop execution (FOC transforms, observers, PI controllers, PWM update): **14.2 µs**
-  - Total control step execution duration: **18.7 µs** on target (37.4% of the 50.0 µs / 20 kHz real-time budget), providing 31.3 µs (62.6%) CPU idle headroom on Core 1.
+  - **Status:** **NOT MEASURED - requires hardware**
+  - Physical execution timing (timer ISR latency, direct register ADC conversion duration, and FOC loop execution time) has not been physically measured on an oscilloscope. Previous figures (ISR 0.8 µs, ADC 4.5 µs, control loop 14.2 µs, total 18.7 µs) were analytical/budgetary estimates and have been removed in accordance with documentation integrity standards. No physical oscilloscope capture or hardware measurement data currently exists in `docs/`.
+  - Required validation: Oscilloscope capture on GPIO 14 (`PIN_TIMING_BENCHMARK`) on target hardware under active PWM switching and ADC conversions.
 - **Overrun Monitoring & Deadline Protection:**
   - Evaluates `ulTaskNotifyTake()` return value on each cycle. If the task misses deadlines (`notifies > 1`), consecutive missed cycles increment an overrun counter.
   - If 3 consecutive overruns occur (`MAX_CONSECUTIVE_OVERRUNS = 3`), the firmware latches a hard real-time violation fault, disables PWM gate outputs, and enters `SAFE_STOP`.

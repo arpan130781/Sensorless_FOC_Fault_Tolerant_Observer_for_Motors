@@ -1398,7 +1398,7 @@ A successful result in one category does not automatically establish success in 
 | PlatformIO ESP32 build (`esp32dev`) | Verified | **SUCCESS (0 warnings with `-Wdouble-promotion -Werror=double-promotion`)** |
 | 10,000-tick performance benchmark | Verified | Host execution benchmark: <50 µs period (target requires hardware scope measurement on GPIO 14) |
 | Physical motor operation | Hardware Required | Requires dyno bench testing |
-| ESP32 execution-time profiling | Verified (Scope Measured) | **18.7 µs** total execution time (37.4% of 50.0 µs budget) on GPIO 14 |
+| ESP32 execution-time profiling | NOT MEASURED - requires hardware | Oscilloscope capture on GPIO 14 (PIN_TIMING_BENCHMARK) required |
 | Hardware fault-injection validation | Hardware Required | Requires physical sensor fault injection rig |
 
 ## 20.2 Resolution of Previous Validation Concerns
@@ -1412,7 +1412,7 @@ All historical test and stability issues have been diagnosed and resolved with r
 - **Reachable SAFE_STOP & True Gate Disabling:** Added continuous second-sensor fault detection and ambiguous fault timeout (1.5s $\to$ SAFE_STOP). Implemented true gate shutdown (`gate_enable = false`, duty 0.0, driving `PIN_GATE_EN` LOW).
 - **Current Sense Headroom & Calibration:** Scaled sensing to $\pm 8.25\text{ A}$ ($R_{shunt}=10\text{ m}\Omega$, Gain 20), added compile-time `static_assert(CURRENT_FULL_SCALE > 1.2f * MOTOR_NOMINAL_IN)`, and added startup offset calibration.
 - **Metrics Integrity & Per-Scenario Onset Scoring:** Derived evaluation start time dynamically from each scenario's onset time (`get_scenario_evaluation_start_time`), eliminating the hardcoded 2.0s cutoff. Replaced `test_transforms.c` with library calls verifying full round-trip invertibility to float precision.
-- **Single-Precision ESP32 Hot Path & FreeRTOS Architecture:** Enforced `-Wdouble-promotion -Werror=double-promotion` across native Makefile and PlatformIO build flags, eliminating implicit double promotions. Added `IRAM_ATTR` on all control loop callees. Refactored `main.cpp` into a high-priority FreeRTOS pinned task with fast direct hardware register SAR ADC1 reads (`adc1_read_fast_reg` via `SENS.sar_meas_start1`, 4.5 µs total for 3 channels), leaving the 20 kHz timer ISR ultra-lean (0.8 µs notification overhead via `vTaskNotifyGiveFromISR`). Added missed deadline detection via `ulTaskNotifyTake` return value, latching `SAFE_STOP` on 3 consecutive overruns. Oscilloscope measurements on `PIN_TIMING_BENCHMARK` (GPIO 14) confirm 18.7 µs total execution time (37.4% of the 50.0 µs / 20 kHz period).
+- **Single-Precision ESP32 Hot Path & FreeRTOS Architecture:** Enforced `-Wdouble-promotion -Werror=double-promotion` across native Makefile and PlatformIO build flags, eliminating implicit double promotions. Added `IRAM_ATTR` on all control loop callees. Refactored `main.cpp` into a high-priority FreeRTOS pinned task with fast direct hardware register SAR ADC1 reads (`adc1_read_fast_reg` via `SENS.sar_meas_start1`), leaving the 20 kHz timer ISR ultra-lean (notification overhead via `vTaskNotifyGiveFromISR`). Added missed deadline detection via `ulTaskNotifyTake` return value, latching `SAFE_STOP` on 3 consecutive overruns. On-target execution timing is marked NOT MEASURED - requires hardware; physical oscilloscope probing on `PIN_TIMING_BENCHMARK` (GPIO 14) is required for target verification.
 
 ---
 
