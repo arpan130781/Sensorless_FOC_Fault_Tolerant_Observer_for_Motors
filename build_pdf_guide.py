@@ -124,8 +124,8 @@ def build_pdf():
         pagesize=letter,
         leftMargin=36,
         rightMargin=36,
-        topMargin=36,
-        bottomMargin=36
+        topMargin=46,
+        bottomMargin=42
     )
 
     styles = getSampleStyleSheet()
@@ -559,17 +559,18 @@ def build_pdf():
         "Transitions are strictly managed by `src/handoff.c` to prevent illegal jumps or oscillatory flapping:",
         styles['BodyLayman']
     ))
+    story.append(Spacer(1, 4))
 
     fsm_data = [
         [Paragraph("<b>Mode Code</b>", styles['TableHeader']), Paragraph("<b>Mode Name</b>", styles['TableHeader']), Paragraph("<b>Physical Operating State & Behavior</b>", styles['TableHeader']), Paragraph("<b>Exit Criteria / Next State</b>", styles['TableHeader'])],
-        [Paragraph("<b>Mode 0</b>", styles['TableCellCenter']), Paragraph("<b>ALIGN</b>", styles['TableCellBold']), Paragraph("Injects DC current into Phase A for 500 ms; holds rotor at 0°.", styles['TableCell']), Paragraph("500 ms timer expires → OPEN_LOOP_RAMP", styles['TableCell'])],
-        [Paragraph("<b>Mode 1</b>", styles['TableCellCenter']), Paragraph("<b>OPEN_LOOP_RAMP</b>", styles['TableCellBold']), Paragraph("Synthesizes rotating I-F vector, accelerating from 0 to 500 RPM.", styles['TableCell']), Paragraph("Speed = 500 RPM & lock &lt; 15° → CLOSED_LOOP", styles['TableCell'])],
+        [Paragraph("<b>Mode 0</b>", styles['TableCellCenter']), Paragraph("<b>ALIGN</b>", styles['TableCellBold']), Paragraph("Injects DC current into Phase A for 500 ms; holds rotor at 0° reference position.", styles['TableCell']), Paragraph("Timer &gt; 500 ms → OPEN_LOOP_RAMP", styles['TableCell'])],
+        [Paragraph("<b>Mode 1</b>", styles['TableCellCenter']), Paragraph("<b>OPEN_LOOP_RAMP</b>", styles['TableCellBold']), Paragraph("Synthesizes rotating I-F vector, accelerating from 0 to 500 RPM.", styles['TableCell']), Paragraph("Speed = 500 RPM &amp; lock &lt; 15° → CLOSED_LOOP", styles['TableCell'])],
         [Paragraph("<b>Mode 2</b>", styles['TableCellCenter']), Paragraph("<b>CLOSED_LOOP</b>", styles['TableCellBold']), Paragraph("Normal 3-shunt FOC with Sliding Mode Observer angle feedback.", styles['TableCell']), Paragraph("Single fault isolated → DEGRADED (Mode 3)", styles['TableCell'])],
-        [Paragraph("<b>Mode 3</b>", styles['TableCellCenter']), Paragraph("<b>DEGRADED</b>", styles['TableCellBold']), Paragraph("Fail-operational 2-shunt mode; missing phase reconstructed.", styles['TableCell']), Paragraph("Second fault detected → SAFE_STOP (Mode 5)", styles['TableCell'])],
-        [Paragraph("<b>Mode 4</b>", styles['TableCellCenter']), Paragraph("<b>LIMP</b>", styles['TableCellBold']), Paragraph("Unresolved ambiguous fault; speed and current limits reduced 50%.", styles['TableCell']), Paragraph("Timeout &gt; 200 ms → SAFE_STOP (Mode 5)", styles['TableCell'])],
-        [Paragraph("<b>Mode 5</b>", styles['TableCellCenter']), Paragraph("<b>SAFE_STOP</b>", styles['TableCellBold']), Paragraph("Catastrophic shutdown; inverter gates disabled (`PIN_GATE_EN = 0`).", styles['TableCell']), Paragraph("Terminal latch; requires full MCU power cycle.", styles['TableCell'])],
+        [Paragraph("<b>Mode 3</b>", styles['TableCellCenter']), Paragraph("<b>DEGRADED</b>", styles['TableCellBold']), Paragraph("Fail-operational 2-shunt mode with active current reconstruction.", styles['TableCell']), Paragraph("2nd fault → SAFE_STOP (Recover &gt; 500 ms)", styles['TableCell'])],
+        [Paragraph("<b>Mode 4</b>", styles['TableCellCenter']), Paragraph("<b>LIMP</b>", styles['TableCellBold']), Paragraph("Ambiguous fault isolated; speed and current limits reduced 50%.", styles['TableCell']), Paragraph("Timeout &gt; 200 ms → SAFE_STOP (Mode 5)", styles['TableCell'])],
+        [Paragraph("<b>Mode 5</b>", styles['TableCellCenter']), Paragraph("<b>SAFE_STOP</b>", styles['TableCellBold']), Paragraph("Inverter gates disabled (PIN_GATE_EN = LOW); freewheeling stop.", styles['TableCell']), Paragraph("Terminal latch; requires full MCU power cycle.", styles['TableCell'])],
     ]
-    t_fsm = Table(fsm_data, colWidths=[60, 110, 210, 160])
+    t_fsm = Table(fsm_data, colWidths=[65, 115, 205, 155])
     t_fsm.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), C_PRIMARY),
         ('BOX', (0,0), (-1,-1), 1, C_BORDER),
@@ -584,7 +585,7 @@ def build_pdf():
     story.append(Spacer(1, 10))
 
     if os.path.exists("docs/figures/fig5_state_machine.png"):
-        story.append(Image("docs/figures/fig5_state_machine.png", width=500, height=135))
+        story.append(Image("docs/figures/fig5_state_machine.png", width=520, height=195))
         story.append(Paragraph("<b>Figure 5:</b> Sensorless FOC Fault-Tolerant State Machine transition flow between operational modes.", styles['FigCaption']))
 
     story.append(PageBreak())
