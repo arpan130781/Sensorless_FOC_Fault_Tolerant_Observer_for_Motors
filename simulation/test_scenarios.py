@@ -384,6 +384,50 @@ def test_burst_spike_rejection(burst_len, offset, phase):
     )
 
 
+@pytest.mark.parametrize("burst_len,offset,expected_latched", [
+    (1, 5.0, False),  # 1 sample up to 5 A rejected
+    (2, 5.0, False),  # 2 samples up to 5 A rejected
+    (4, 1.4, False),  # 4 samples at 1.4 A rejected (< KCL_SEVERE_THRESH)
+    (5, 0.5, False),  # 5 samples at 0.5 A rejected
+    (3, 2.0, True),   # 3 samples at 2.0 A MUST latch fault (> KCL_SEVERE_THRESH & n >= 3)
+])
+def test_burst_immunity_envelope_boundaries(burst_len, offset, expected_latched):
+    """
+    Round-5 Task 3 Regression Test:
+    Pins the exact boundary envelope of the fault monitor burst-immunity debounce logic:
+    - 1-2 samples at any magnitude up to 5.0 A are rejected.
+    - 4 samples at 1.4 A and 5 samples at 0.5 A are rejected.
+    - 3 samples at 2.0 A MUST latch a fault, derating to DEGRADED mode for 500 ms.
+    """
+    cfg = dict(SIM_PARAMS)
+    cfg['total_time'] = 2.8 if expected_latched else 2.2
+    runner = SILRunner(config_sim=cfg, fault_scenario='no_fault_baseline')
+    runner.injector = BurstSampleSpikeInjector(2.0, 'a', offset, burst_len)
+    res = runner.run()
+
+    closed_loop_mask = res.time >= 1.5
+    modes = set(res.control_mode[closed_loop_mask])
+
+    if not expected_latched:
+        assert modes == {2.0}, (
+            f"Expected burst {burst_len} samples @ {offset} A to be rejected, but modes={modes}"
+        )
+    else:
+        # Must latch DEGRADED (mode 3)
+        assert 3.0 in modes, (
+            f"Expected burst {burst_len} samples @ {offset} A to latch fault (mode 3), but modes={modes}"
+        )
+        # Verify 500 ms derate duration: enters at ~2.001s, returns to mode 2 at ~2.501s
+        t = np.array(res.time)
+        m = np.array(res.control_mode)
+        degraded_times = t[m == 3.0]
+        derate_duration = degraded_times[-1] - degraded_times[0]
+        assert 0.45 <= derate_duration <= 0.55, (
+            f"Expected derate duration ~0.50 s, got {derate_duration:.3f} s"
+        )
+        assert m[-1] == 2.0, f"Expected recovery back to mode 2 after derate, got mode {m[-1]}"
+
+
 def test_safe_stop_reachable_on_second_fault_and_ambiguous():
     """
     Task 4 regression test:

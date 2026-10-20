@@ -370,6 +370,22 @@ Real hardware can also exhibit residuals because of:
 
 The threshold therefore requires validation against the actual measurement system.
 
+### 6.1.1 Burst-Immunity Envelope & Debounce Thresholds
+
+To prevent spurious fault latching from high-frequency ADC noise spikes, EMI glitches, and inverter switching transients, the KCL residual monitor implements a two-tier consecutive-sample debounce envelope in [`src/fault_monitor.c`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/fault_monitor.c):
+1. **Standard Residual Track ($0.3\text{ A} < |E| \le 1.5\text{ A}$):** Requires $N \ge 5$ consecutive exceedance samples ($250\,\mu\text{s}$ at $20\,\text{kHz}$) before declaring a fault candidate.
+2. **Severe Residual Fast Track ($|E| > 1.5\text{ A}$):** Requires $N \ge 3$ consecutive exceedance samples ($150\,\mu\text{s}$ at $20\,\text{kHz}$) to accelerate genuine fault isolation under massive short/saturation events while rejecting short transient spikes.
+3. **Immediate Debounce Reset:** If the KCL residual drops below $0.3\text{ A}$ on any sample, the exceedance counter resets to zero immediately.
+
+The verified boundary envelope is pinned by automated regression tests (`test_burst_immunity_envelope_boundaries`):
+
+| Burst Length ($N$ samples) | Duration (@ 20 kHz) | Spike Amplitude ($|E|$) | Controller Response | Action Taken |
+| :--- | :--- | :--- | :--- | :--- |
+| **1–2 samples** | 50–100 µs | Any magnitude (up to 5.0 A) | **REJECTED** | Retains `CLOSED_LOOP` (mode 2); zero false trips |
+| **4 samples** | 200 µs | 1.4 A ($< 1.5\text{ A}$) | **REJECTED** | Retains `CLOSED_LOOP` (mode 2); within 5-sample limit |
+| **5 samples** | 250 µs | 0.5 A ($> 0.3\text{ A}$) | **REJECTED** | Retains `CLOSED_LOOP` (mode 2); transient clears before window isolation completes |
+| **3 samples** | 150 µs | 2.0 A ($> 1.5\text{ A}$) | **LATCHES FAULT** | Fast track triggers; isolates channel, derates to `DEGRADED` (mode 3) for 500 ms, then recovers |
+
 ## 6.2 Stuck-Sensor Detection
 
 The fault monitor maintains the previous sample and a counter for each phase.
