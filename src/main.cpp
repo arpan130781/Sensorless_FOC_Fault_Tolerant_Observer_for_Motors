@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <driver/gpio.h>
 #include <driver/adc.h>
+#include <esp_timer.h>
 #include <soc/sens_struct.h>
 #include <soc/sens_reg.h>
 
@@ -11,7 +12,7 @@
  * - 20kHz hardware timer interrupt minimally notifies high-priority control task via vTaskNotifyGiveFromISR (< 1 us ISR overhead).
  * - Control task pinned to Core 1 executes full sensorless FOC loop, observers, fault isolation, and PWM duty cycle updates.
  * - Hardware Mode: Fast hardware register SAR ADC1 reads (channels 4, 5, 6 on GPIO 32, 33, 34) directly polling
- *   SENS.sar_meas_start1 without RTOS spinlock or driver overhead (~1.5 us per conversion).
+ *   SENS.sar_meas_start1 without RTOS spinlock or driver overhead (bounded 50 us wait; treats expiry as hardware fault).
  * - Real-Time Overrun Monitoring: ulTaskNotifyTake return count detects missed deadlines and latches SAFE_STOP on consecutive overruns.
  * - Simulation/Wokwi Mode (default or GPIO 4 LOW): Emulates PMSM motor physics in real-time.
  * - Fault Injection: Pushbutton on GPIO 15 to inject a sensor offset fault.
@@ -25,13 +26,27 @@ extern "C" {
     #include "motor_params.h"
 }
 
-// Fast direct hardware register SAR ADC1 conversion (~1.5 us per channel)
-// Manipulates SENS.sar_meas_start1 directly, bypassing ESP-IDF driver locks
-static inline uint16_t adc1_read_fast_reg(int channel) {
+// Latching hardware ADC fault flag
+static volatile bool g_adc_hardware_fault = false;
+
+// Direct hardware register SAR ADC1 conversion.
+// Manipulates SENS.sar_meas_start1 directly, bypassing ESP-IDF driver locks.
+// Bounded wait with 50 us timeout; treats expiry as a hardware fault.
+static inline uint16_t adc1_read_fast_reg(int channel, bool *out_error = NULL) {
     SENS.sar_meas_start1.sar1_en_pad = (1 << channel);
     SENS.sar_meas_start1.meas1_start_sar = 0;
     SENS.sar_meas_start1.meas1_start_sar = 1;
-    while (!SENS.sar_meas_start1.meas1_done_sar) {}
+
+    int64_t start_time = esp_timer_get_time();
+    while (!SENS.sar_meas_start1.meas1_done_sar) {
+        if ((esp_timer_get_time() - start_time) > 50) {
+            g_adc_hardware_fault = true;
+            if (out_error) {
+                *out_error = true;
+            }
+            return 0;
+        }
+    }
     return (uint16_t)(SENS.sar_meas_start1.meas1_data_sar & 0x0FFF);
 }
 
@@ -165,10 +180,25 @@ void foc_control_task(void *pvParameters) {
             }
         } else {
             // Fast direct hardware register SAR ADC1 reads (channels 4, 5, 6 on GPIO 32, 33, 34)
-            // Polling SENS.sar_meas_start1 directly (~1.5 us per channel) without driver locks
-            float a_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_4);
-            float b_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_5);
-            float c_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_6);
+            // Polling SENS.sar_meas_start1 with bounded 50 us timeout; flags hardware fault on expiration
+            bool adc_err = false;
+            float a_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_4, &adc_err);
+            float b_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_5, &adc_err);
+            float c_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_6, &adc_err);
+
+            if (adc_err || g_adc_hardware_fault) {
+                // Hardware ADC timeout fault: latch SAFE_STOP immediately
+                gpio_set_level((gpio_num_t)PIN_GATE_EN, 0);
+                ledcWrite(0, 0); ledcWrite(1, 0); ledcWrite(2, 0);
+                digitalWrite(PIN_LED_FAULT, HIGH);
+                digitalWrite(PIN_LED_NORMAL, LOW);
+                digitalWrite(PIN_LED_DEGRADED, LOW);
+                portENTER_CRITICAL(&telemetryMux);
+                telemetry_mode = 5; // SAFE_STOP
+                portEXIT_CRITICAL(&telemetryMux);
+                gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 0);
+                continue;
+            }
 
             ia = (a_raw - adc_offset_a) * CURRENT_SCALE;
             ib = (b_raw - adc_offset_b) * CURRENT_SCALE;
@@ -287,6 +317,13 @@ void setup() {
     ledcAttachPin(PIN_PWM_C, 2);
 
     // Direct Hardware Register ADC1 Configuration (GPIO 32, 33, 34)
+    // Non-Linearity Documentation (11 dB Attenuation):
+    // The ESP32 SAR ADC configured with ADC_ATTEN_DB_11 exhibits non-linear transfer characteristics,
+    // particularly below ~100 mV and above ~3.1 V. In this fast direct register reading path, 11 dB
+    // attenuation non-linearity is UNCORRECTED by esp_adc_cal or polynomial LUT. Midpoint-biased shunt
+    // amplifiers center zero current at Vref/2 (~1.65 V / ~2048 counts) where the response is predominantly
+    // monotonic and linear. Target hardware calibration using esp_adc_cal_characterize() or a piece-wise
+    // linear lookup table is recommended for applications requiring precise absolute current accuracy.
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_11);
     adc1_config_channel_atten(ADC1_CHANNEL_5, ADC_ATTEN_DB_11);
@@ -300,10 +337,17 @@ void setup() {
     // Startup offset calibration: average 500 samples with PWM off using direct fast ADC register reads
     float sum_a = 0.0f, sum_b = 0.0f, sum_c = 0.0f;
     const int CAL_SAMPLES = 500;
+    bool cal_err = false;
     for (int i = 0; i < CAL_SAMPLES; i++) {
-        sum_a += (float)adc1_read_fast_reg(ADC1_CHANNEL_4);
-        sum_b += (float)adc1_read_fast_reg(ADC1_CHANNEL_5);
-        sum_c += (float)adc1_read_fast_reg(ADC1_CHANNEL_6);
+        sum_a += (float)adc1_read_fast_reg(ADC1_CHANNEL_4, &cal_err);
+        sum_b += (float)adc1_read_fast_reg(ADC1_CHANNEL_5, &cal_err);
+        sum_c += (float)adc1_read_fast_reg(ADC1_CHANNEL_6, &cal_err);
+        if (cal_err || g_adc_hardware_fault) {
+            Serial.println("[HAL] FATAL: ADC conversion timeout during startup offset calibration!");
+            g_adc_hardware_fault = true;
+            digitalWrite(PIN_LED_FAULT, HIGH);
+            break;
+        }
         delayMicroseconds(50);
     }
     adc_offset_a = sum_a / (float)CAL_SAMPLES;
@@ -364,6 +408,13 @@ void loop() {
         digitalWrite(PIN_LED_NORMAL, blink_state ? HIGH : LOW);
         digitalWrite(PIN_LED_DEGRADED, LOW);
         digitalWrite(PIN_LED_FAULT, LOW);
+    }
+
+    // Hardware ADC timeout fault latch: force fault LED state
+    if (g_adc_hardware_fault) {
+        digitalWrite(PIN_LED_NORMAL, LOW);
+        digitalWrite(PIN_LED_DEGRADED, LOW);
+        digitalWrite(PIN_LED_FAULT, HIGH);
     }
 
     // Telemetry streaming in Serial Plotter format
