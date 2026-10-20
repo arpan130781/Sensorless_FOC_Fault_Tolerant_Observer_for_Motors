@@ -12,7 +12,7 @@
  * - 20kHz hardware timer interrupt minimally notifies high-priority control task via vTaskNotifyGiveFromISR (< 1 us ISR overhead).
  * - Control task pinned to Core 1 executes full sensorless FOC loop, observers, fault isolation, and PWM duty cycle updates.
  * - Hardware Mode: Fast hardware register SAR ADC1 reads (channels 4, 5, 6 on GPIO 32, 33, 34) directly polling
- *   SENS.sar_meas_start1 without RTOS spinlock or driver overhead (bounded 50 us wait; treats expiry as hardware fault).
+ *   SENS.sar_meas_start1 without RTOS spinlock or driver overhead (bounded 15 us wait; treats expiry as hardware fault).
  * - Real-Time Overrun Monitoring: ulTaskNotifyTake return count detects missed deadlines and latches SAFE_STOP on consecutive overruns.
  * - Simulation/Wokwi Mode (default or GPIO 4 LOW): Emulates PMSM motor physics in real-time.
  * - Fault Injection: Pushbutton on GPIO 15 to inject a sensor offset fault.
@@ -62,7 +62,13 @@ static volatile bool g_adc_hardware_fault = false;
 
 // Direct hardware register SAR ADC1 conversion.
 // Manipulates SENS.sar_meas_start1 directly, bypassing ESP-IDF driver locks.
-// Bounded wait with 50 us timeout; treats expiry as a hardware fault.
+// Bounded wait with 15 us timeout per conversion; treats expiry as a hardware fault.
+// Rationale: In a 20 kHz FOC loop, each control tick is exactly 50 us. A 50 us timeout
+// per conversion could block the task for up to 150 us (3 missed ticks) before tripping.
+// Reducing to 15 us bounds conversion wait within a fraction of a single tick period,
+// guaranteeing that any hardware failure triggers an immediate abort and shutdown.
+#define ADC_CONVERSION_TIMEOUT_US 15
+
 static inline uint16_t adc1_read_fast_reg(int channel, bool *out_error = NULL) {
     SENS.sar_meas_start1.sar1_en_pad = (1 << channel);
     SENS.sar_meas_start1.meas1_start_sar = 0;
@@ -70,7 +76,7 @@ static inline uint16_t adc1_read_fast_reg(int channel, bool *out_error = NULL) {
 
     int64_t start_time = esp_timer_get_time();
     while (!SENS.sar_meas_start1.meas1_done_sar) {
-        if ((esp_timer_get_time() - start_time) > 50) {
+        if ((esp_timer_get_time() - start_time) > ADC_CONVERSION_TIMEOUT_US) {
             g_adc_hardware_fault = true;
             if (out_error) {
                 *out_error = true;
@@ -145,6 +151,19 @@ static float sim_id = 0.0f;
 static float sim_iq = 0.0f;
 static float sim_omega_m = 0.0f;
 static float sim_theta_e = 0.0f;
+
+// Latch hardware fault, disable inverter gates, set fault LED, and record SAFE_STOP
+static inline void latch_hardware_fault_safe_stop() {
+    gpio_set_level((gpio_num_t)PIN_GATE_EN, 0);
+    ledcWrite(0, 0); ledcWrite(1, 0); ledcWrite(2, 0);
+    digitalWrite(PIN_LED_FAULT, HIGH);
+    digitalWrite(PIN_LED_NORMAL, LOW);
+    digitalWrite(PIN_LED_DEGRADED, LOW);
+    portENTER_CRITICAL(&telemetryMux);
+    telemetry_mode = 5; // SAFE_STOP
+    portEXIT_CRITICAL(&telemetryMux);
+    gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 0);
+}
 
 // ============================================================================
 // 20kHz HARDWARE TIMER ISR (Ultra-low latency task notification)
@@ -229,23 +248,24 @@ void foc_control_task(void *pvParameters) {
             }
         } else {
             // Fast direct hardware register SAR ADC1 reads (channels 4, 5, 6 on GPIO 32, 33, 34)
-            // Polling SENS.sar_meas_start1 with bounded 50 us timeout; flags hardware fault on expiration
+            // Polling SENS.sar_meas_start1 with bounded 15 us timeout.
+            // Bails out immediately on first failure: latches fault, disables gates, and skips remaining reads.
             bool adc_err = false;
             float a_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_4, &adc_err);
-            float b_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_5, &adc_err);
-            float c_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_6, &adc_err);
-
             if (adc_err || g_adc_hardware_fault) {
-                // Hardware ADC timeout fault: latch SAFE_STOP immediately
-                gpio_set_level((gpio_num_t)PIN_GATE_EN, 0);
-                ledcWrite(0, 0); ledcWrite(1, 0); ledcWrite(2, 0);
-                digitalWrite(PIN_LED_FAULT, HIGH);
-                digitalWrite(PIN_LED_NORMAL, LOW);
-                digitalWrite(PIN_LED_DEGRADED, LOW);
-                portENTER_CRITICAL(&telemetryMux);
-                telemetry_mode = 5; // SAFE_STOP
-                portEXIT_CRITICAL(&telemetryMux);
-                gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 0);
+                latch_hardware_fault_safe_stop();
+                continue;
+            }
+
+            float b_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_5, &adc_err);
+            if (adc_err || g_adc_hardware_fault) {
+                latch_hardware_fault_safe_stop();
+                continue;
+            }
+
+            float c_raw = (float)adc1_read_fast_reg(ADC1_CHANNEL_6, &adc_err);
+            if (adc_err || g_adc_hardware_fault) {
+                latch_hardware_fault_safe_stop();
                 continue;
             }
 
@@ -459,10 +479,22 @@ void setup() {
     bool cal_err = false;
     for (int i = 0; i < CAL_SAMPLES; i++) {
         sum_a += (float)adc1_read_fast_reg(ADC1_CHANNEL_4, &cal_err);
+        if (cal_err || g_adc_hardware_fault) {
+            Serial.println("[HAL] FATAL: ADC conversion timeout on Phase A during startup offset calibration!");
+            g_adc_hardware_fault = true;
+            digitalWrite(PIN_LED_FAULT, HIGH);
+            break;
+        }
         sum_b += (float)adc1_read_fast_reg(ADC1_CHANNEL_5, &cal_err);
+        if (cal_err || g_adc_hardware_fault) {
+            Serial.println("[HAL] FATAL: ADC conversion timeout on Phase B during startup offset calibration!");
+            g_adc_hardware_fault = true;
+            digitalWrite(PIN_LED_FAULT, HIGH);
+            break;
+        }
         sum_c += (float)adc1_read_fast_reg(ADC1_CHANNEL_6, &cal_err);
         if (cal_err || g_adc_hardware_fault) {
-            Serial.println("[HAL] FATAL: ADC conversion timeout during startup offset calibration!");
+            Serial.println("[HAL] FATAL: ADC conversion timeout on Phase C during startup offset calibration!");
             g_adc_hardware_fault = true;
             digitalWrite(PIN_LED_FAULT, HIGH);
             break;

@@ -1441,7 +1441,7 @@ A successful result in one category does not automatically establish success in 
 | Scenario 14 (Persistent Ambiguous) | Verified | **PASS** (SAFE_STOP in 1500 ms, gate disabled, duty 0.0) |
 | Fault-isolation robustness sweep (144 configs) | Verified | **144/144 (100%) acceptable outcomes** across all 6 groups |
 | MATLAB & Simulink Co-Simulation | Verified | **PASS** (1.95 ms detection latency, 3.73° angle RMS) |
-| PlatformIO ESP32 build (`esp32dev`) | Verified | **SUCCESS** (RAM: 22,212 B / 6.8%, Flash: 299,225 B / 22.8%, 0 warnings). Raw log: [`docs/evidence/pio_build_20261020.log`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/docs/evidence/pio_build_20261020.log) |
+| PlatformIO ESP32 build (`esp32dev`) | Verified | **SUCCESS** (RAM: 22,212 B / 6.8%, Flash: 299,545 B / 22.9%, 0 warnings). Raw log: [`docs/evidence/pio_build_20261020.log`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/docs/evidence/pio_build_20261020.log) |
 | 10,000-tick performance benchmark | Verified | Host execution benchmark: <50 µs period (target requires hardware scope measurement on GPIO 14) |
 | Physical motor operation | Hardware Required | Requires dyno bench testing |
 | ESP32 execution-time profiling | NOT MEASURED - requires hardware | Oscilloscope capture on GPIO 14 (PIN_TIMING_BENCHMARK) required |
