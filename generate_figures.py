@@ -305,7 +305,7 @@ def generate_fig5():
     # 7. LIMP -> SAFE_STOP (Horizontal)
     ax.annotate('', xy=(9.0, 1.1), xytext=(7.2, 1.1),
                 arrowprops=dict(arrowstyle="->", color='#9333EA', lw=1.8, ls='--', mutation_scale=12))
-    ax.text(8.1, 1.28, 'Timeout > 200ms', fontsize=7.5, ha='center', color='#9333EA', fontweight='bold')
+    ax.text(8.1, 1.28, 'Timeout > 1.5s', fontsize=7.5, ha='center', color='#9333EA', fontweight='bold')
     
     # 8. CLOSED_LOOP -> SAFE_STOP (Critical Inverter Fault / Task Overrun)
     ax.annotate('', xy=(9.0, 1.7), xytext=(7.2, 2.9),

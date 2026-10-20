@@ -279,7 +279,7 @@ The repository includes a complete Simulink co-simulation environment in `simuli
 ### Embedded PlatformIO Firmware Build
 - **Platform:** Espressif 32 (ESP32 Dev Module, 240 MHz Xtensa LX6)
 - **Compilation Flags:** `-I src -Wdouble-promotion -Werror=double-promotion`
-- **Compiler Warnings:** **0 warnings, 0 errors** under `-Wdouble-promotion`
+- **Compiler Warnings:** **0 double-promotion warnings (1 framework warning in esp32-hal-uart.c and the expected dead-time #warning are present in the logs)** under `-Wdouble-promotion -Werror=double-promotion`
 - **Static Firmware Image Size (Host Cross-Compilation):**
   - RAM Usage: 22,212 bytes (6.8% of 327,680 bytes)
   - Flash Usage: 299,545 bytes (22.9% of 1,310,720 bytes)
