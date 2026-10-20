@@ -775,5 +775,48 @@ The following table documents every numerical value appearing in `docs/Sensorles
 - **Automated Code Constants Audit:** Verified all constants match canonical C source code definitions.
 - **PDF Compilation:** `docs/Sensorless_FOC_Motor_Control_Guide.pdf` compiles cleanly with dynamic table generation and zero formatting errors.
 
+---
+
+## Round 8 - Evidence Integrity, Testcase Fingerprinting & Staleness Prevention
+
+### Root Cause & Defect Analysis
+1. **Stale Evidence Persistence Across Source Changes:** `simulation/conftest.py` previously merged pre-existing XML records cumulatively without checking whether underlying source files had changed. A developer could mutate detector thresholds in `src/fault_monitor.c`, break scenario physics, and yet running `pytest simulation/test_pdf_integrity.py` alone would still pass because it read stale historical "PASS" records from `build/pytest_report.xml`.
+2. **JUnit Testcase Duplication:** Pre-existing XML reports accumulated duplicate testcase entries (e.g., 136 records for 131 tests) due to non-uniform keying between test file paths, classnames, and parameter representations across test runs.
+3. **Legacy Terminology Inaccuracy ("ISO/IEC"):** The PDF technical guide referenced "ISO/IEC" in the table of contents, Chapter 8 overview, and script descriptions. The repository implements rigorous project-specific engineering acceptance criteria, not certified ISO/IEC compliance standards.
+4. **Lack of Cryptographic Build Traceability:** The compiled PDF lacked an embedded cryptographic fingerprint linking its claims and scenario tables to the exact source commit and file tree from which it was generated.
+
+### Implementation & Verification
+1. **Deterministic Source Fingerprinting & Automatic Stale Record Invalidation:**
+   - Implemented `compute_source_fingerprint(repo_root)` in `build_pdf_guide.py` and `simulation/conftest.py`. The fingerprint computes a deterministic SHA-256 hash across all motor control and simulation source files: `src/*.c`, `src/*.h`, `src/motor_params.h`, `simulation/fault_injection/fault_scenarios.yaml`, and `simulation/**/*.py` (excluding PDF test scripts).
+   - In `simulation/conftest.py` (`pytest_sessionstart`), pre-existing JUnit records in `build/pytest_report.xml` are inspected. Any records with a fingerprint differing from the current source fingerprint are pruned.
+   - Updated `test_pdf_scenario_table_matches_yaml` in `simulation/test_pdf_integrity.py` to assert that every scenario record in `build/pytest_report.xml` possesses a fingerprint matching the current source tree. If any record is missing or stale, the test fails with: `"Run the scenario tests ('pytest simulation/test_scenarios.py') to re-verify."`
+2. **Strict NodeID-Based De-duplication (1:1 Ratio):**
+   - In `simulation/conftest.py`, session cases are strictly keyed by their canonical pytest `nodeid` (e.g. `simulation/test_scenarios.py::test_scenario[scenario_0]`).
+   - Normalised XML `classname` attributes uniformly.
+   - Implemented `test_junit_report_has_exactly_one_record_per_collected_test` in `simulation/test_pdf_integrity.py`. It uses `pytest --collect-only` to verify that `build/pytest_report.xml` contains exactly one record per collected test with zero duplicates (133 records for 133 tests).
+3. **Staleness Bug Regression Test Suite:**
+   - Implemented `test_staleness_detection_fails_on_source_mutation` in `simulation/test_pdf_integrity.py`.
+   - In an isolated temporary directory, it mutates `src/fault_monitor.c`, runs only `pytest simulation/test_pdf_integrity.py`, and asserts that the suite fails with an exit code of 1 due to the stale fingerprint mismatch.
+   - Incorporated `SKIP_STALENESS_SUBPROCESS` environment variable guard to eliminate recursive test spawning.
+4. **Removal of "ISO/IEC" Terminology:**
+   - Replaced all occurrences of "ISO/IEC" with "project acceptance criteria" across the Executive Summary, Table of Contents, Chapter 7 `metrics.py` description, Chapter 8 intro, and `test_scenarios.py` description in `build_pdf_guide.py`.
+   - Added `"ISO/IEC"` to `disallowed_phrases` in `test_committed_pdf_text_integrity` to prevent regression.
+5. **PDF Recompilation with Cryptographic Traceability:**
+   - Rebuilt `docs/Sensorless_FOC_Motor_Control_Guide.pdf` with ReportLab.
+   - Added a `TraceabilityNote` section on Page 19 displaying the exact SHA-256 source fingerprint (`6b0e7ba6b9347798801ba2c58209be5c45e65ab7ad690c21e1e85859f7aabe1e`), the Git commit hash, and verification badge.
+   - Verified that the document remains exactly 19 pages with zero formatting overflows.
+
+---
+
+## Round 8 Verification Summary
+
+- **C Unit Tests:** `make lib && make test` $\to$ **PASSED** (<$10^{-5}$ float round-trip invertibility, 0 warnings).
+- **Physical Simulation Test Suite:** `.venv/bin/pytest simulation/ -q` $\to$ **133/133 PASSED (100% GREEN)**.
+- **Automated PDF Integrity Suite:** `.venv/bin/pytest simulation/test_pdf_integrity.py` $\to$ **5/5 PASSED (100%)**.
+- **JUnit 1:1 Traceability:** Exactly 133 testcases in `build/pytest_report.xml` matching 133 collected tests with 100% source fingerprint consistency.
+- **Automated Code Constants Audit:** All constants verified against canonical C headers.
+- **PDF Artifact:** `docs/Sensorless_FOC_Motor_Control_Guide.pdf` compiled cleanly with source fingerprint traceability and verified on Page 19.
+
+
 
 

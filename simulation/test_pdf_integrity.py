@@ -4,6 +4,7 @@ import sys
 import yaml
 import pytest
 import pypdf
+import xml.etree.ElementTree as ET
 
 # Ensure project root is on sys.path
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -15,11 +16,14 @@ from build_pdf_guide import (
     get_scenario_data_from_yaml_and_junit,
     generate_scenario_title_and_desc,
     get_motor_rated_torque,
+    compute_source_fingerprint,
+    get_git_commit_hash,
+    get_collected_test_nodeids,
 )
 
 def test_pdf_scenario_table_matches_yaml():
     """
-    Integrity regression test (Round-6 / Round-7):
+    Integrity regression test (Round-6 / Round-7 / Round-8):
     Asserts that the Master Scenario Table rendered in the PDF guide
     matches simulation/fault_injection/fault_scenarios.yaml exactly:
     1. JUnit test report exists.
@@ -28,7 +32,7 @@ def test_pdf_scenario_table_matches_yaml():
     4. The fault types, onsets, channels, and parameter magnitudes match.
     5. The acceptance criteria match the YAML criteria dictionary.
     6. No non-existent or fabricated scenarios exist in the PDF table.
-    7. All scenarios have a verified PASS result from test execution in the JUnit report.
+    7. All scenarios have a verified PASS result with an up-to-date source fingerprint.
     """
     yaml_path = os.path.join(BASE_DIR, 'simulation', 'fault_injection', 'fault_scenarios.yaml')
     assert os.path.exists(yaml_path), f"YAML file missing at {yaml_path}"
@@ -40,9 +44,47 @@ def test_pdf_scenario_table_matches_yaml():
         f"JUnit test report missing at {junit_path}. Run pytest to generate it."
     )
 
-    pdf_scenarios = get_scenario_data_from_yaml_and_junit(yaml_path=yaml_path, junit_path=junit_path)
+    current_fp = compute_source_fingerprint(BASE_DIR)
 
-    # 1. Assert exactly 15 scenarios
+    # 1. Inspect raw XML testcases to assert presence and non-stale fingerprint
+    tree = ET.parse(junit_path)
+    root = tree.getroot()
+    tc_by_name = {}
+    for tc in root.iter("testcase"):
+        tc_name = tc.get("name", "")
+        tc_by_name[tc_name] = tc
+
+    for sc_key in yaml_scenarios.keys():
+        expected_tc_name = f"test_all_scenarios_execute_and_pass[{sc_key}]"
+        tc = tc_by_name.get(expected_tc_name)
+        if tc is None:
+            # Fallback search for parameterized bracket name
+            for name, cand in tc_by_name.items():
+                if f"[{sc_key}]" in name and "test_all_scenarios_execute_and_pass" in name:
+                    tc = cand
+                    break
+
+        if tc is None:
+            pytest.fail(
+                f"Scenario '{sc_key}' test record is missing from {junit_path}. "
+                "Run the scenario tests ('pytest simulation/test_scenarios.py') to generate valid evidence."
+            )
+
+        tc_fp = tc.get("fingerprint")
+        if tc_fp != current_fp:
+            pytest.fail(
+                f"Scenario '{sc_key}' has a stale source fingerprint in JUnit report ({tc_fp} != {current_fp}). "
+                "Source files have changed since the last test run. "
+                "Run the scenario tests ('pytest simulation/test_scenarios.py') to re-verify."
+            )
+
+        has_failure = len(tc.findall("failure")) > 0 or len(tc.findall("error")) > 0
+        if has_failure:
+            pytest.fail(f"Scenario '{sc_key}' recorded a FAIL in {junit_path}.")
+
+    pdf_scenarios = get_scenario_data_from_yaml_and_junit(yaml_path=yaml_path, junit_path=junit_path, repo_root=BASE_DIR)
+
+    # 2. Assert exactly 15 scenarios
     assert len(yaml_scenarios) == 15, f"Expected 15 scenarios in YAML, got {len(yaml_scenarios)}"
     assert len(pdf_scenarios) == len(yaml_scenarios), (
         f"Scenario count mismatch: PDF table has {len(pdf_scenarios)}, YAML has {len(yaml_scenarios)}"
@@ -62,7 +104,7 @@ def test_pdf_scenario_table_matches_yaml():
         for item in pdf_scenarios.values():
             assert d.lower() not in item['title'].lower(), f"Disallowed legacy scenario '{d}' found in PDF table"
 
-    # 2. Assert every YAML key exists, parameters/criteria match, and JUnit result is PASS
+    # 3. Assert every YAML key exists, parameters/criteria match, and JUnit result is PASS
     for sc_key, y_conf in yaml_scenarios.items():
         assert sc_key in pdf_scenarios, f"Scenario '{sc_key}' missing from PDF scenario table"
         pdf_item = pdf_scenarios[sc_key]
@@ -86,21 +128,61 @@ def test_pdf_scenario_table_matches_yaml():
                 f"Mode mismatch for '{sc_key}': YAML={y_conf['expected_outcome']['expected_mode_after_fault']} vs PDF={pdf_item['expected_mode']}"
             )
 
-        # Verify test result is PASS (must fail if report missing or scenario absent/failing)
+        # Verify test result is PASS
         assert pdf_item['test_result'] == 'PASS', (
-            f"Scenario '{sc_key}' did not have a verified PASS in JUnit report (got '{pdf_item['test_result']}')"
+            f"Scenario '{sc_key}' did not have a verified PASS in JUnit report (got '{pdf_item['test_result']}'). "
+            "Run the scenario tests ('pytest simulation/test_scenarios.py') to re-verify."
         )
+
+
+def test_junit_report_has_exactly_one_record_per_collected_test():
+    """
+    Integrity regression test (Round-8 Item 2):
+    Verifies that build/pytest_report.xml contains exactly one de-duplicated
+    record per collected test in the test suite, with matching nodeids and no duplicates.
+    """
+    junit_path = os.path.join(BASE_DIR, 'build', 'pytest_report.xml')
+    assert os.path.exists(junit_path), f"JUnit test report missing at {junit_path}"
+
+    current_fp = compute_source_fingerprint(BASE_DIR)
+    collected_nodeids = get_collected_test_nodeids(BASE_DIR)
+    assert len(collected_nodeids) > 0, "No tests collected by pytest"
+
+    tree = ET.parse(junit_path)
+    root = tree.getroot()
+    testcases = root.findall(".//testcase")
+
+    report_nodeids = []
+    for tc in testcases:
+        nodeid = tc.get("nodeid")
+        assert nodeid is not None, f"Testcase in {junit_path} missing 'nodeid' attribute: {tc.attrib}"
+        assert tc.get("fingerprint") == current_fp, (
+            f"Testcase {nodeid} has stale fingerprint ({tc.get('fingerprint')} != {current_fp})"
+        )
+        report_nodeids.append(nodeid)
+
+    # Assert exactly one record per collected test (no duplicates)
+    assert len(report_nodeids) == len(set(report_nodeids)), (
+        f"Duplicate records found in {junit_path}: {len(report_nodeids)} records vs {len(set(report_nodeids))} unique"
+    )
+    assert len(testcases) == len(collected_nodeids), (
+        f"Report record count mismatch: {junit_path} has {len(testcases)} records, but pytest collected {len(collected_nodeids)} tests"
+    )
+    assert set(report_nodeids) == set(collected_nodeids), (
+        f"Report nodeids do not match collected nodeids. Difference: {set(collected_nodeids) ^ set(report_nodeids)}"
+    )
 
 
 def test_committed_pdf_text_integrity():
     """
-    Integrity regression test (Round-7 Item 4 & 5 & 6):
+    Integrity regression test (Round-7 & Round-8):
     Extracts text from the committed PDF (docs/Sensorless_FOC_Motor_Control_Guide.pdf)
     using pypdf and verifies:
-    1. None of the legacy fabricated names appear.
+    1. None of the legacy fabricated names or disallowed phrases appear (including 'ISO/IEC').
     2. Each scenario contains its YAML-derived title and critical parameters (scale, rpm, rate, torque).
     3. Ungrounded claims ('aerospace hardware', 'equal to rated full load') do not appear.
     4. Rated torque formula and values match motor_params.h.
+    5. Build source fingerprint and git commit hash appear on the final page.
     """
     pdf_path = os.path.join(BASE_DIR, 'docs', 'Sensorless_FOC_Motor_Control_Guide.pdf')
     assert os.path.exists(pdf_path), f"Committed PDF not found at {pdf_path}"
@@ -109,7 +191,7 @@ def test_committed_pdf_text_integrity():
     full_text = "\n".join(page.extract_text() for page in reader.pages)
     norm_text = re.sub(r"\s+", " ", full_text)
 
-    # 1. Assert no legacy fabricated names appear
+    # 1. Assert no legacy fabricated names or disallowed phrases appear
     disallowed_phrases = [
         "Inverter Leg A Open",
         "Two-Phase Startup",
@@ -120,6 +202,7 @@ def test_committed_pdf_text_integrity():
         "Parameter Mismatch +-20%",
         "previously reserved for aerospace hardware",
         "equal to rated full load",
+        "ISO/IEC",
     ]
     for phrase in disallowed_phrases:
         assert phrase.lower() not in norm_text.lower(), (
@@ -158,6 +241,19 @@ def test_committed_pdf_text_integrity():
         title, _ = generate_scenario_title_and_desc(sc_key, y_conf)
         assert title in norm_text, f"Generated scenario title '{title}' (for {sc_key}) missing in PDF text"
 
+    # 4. Assert source fingerprint and git commit hash appear on the final page
+    current_fp = compute_source_fingerprint(BASE_DIR)
+    assert current_fp in norm_text or current_fp[:16] in norm_text, (
+        f"Source fingerprint '{current_fp}' missing from PDF guide"
+    )
+    import subprocess
+    recent_commits = subprocess.check_output(
+        ["git", "log", "-n", "5", "--format=%H"], cwd=BASE_DIR, text=True
+    ).split()
+    assert any(c in norm_text or c[:7] in norm_text for c in recent_commits), (
+        f"Git commit hash from recent history ({recent_commits[:3]}) missing from PDF guide"
+    )
+
 
 def test_code_constants_audit():
     """
@@ -166,3 +262,51 @@ def test_code_constants_audit():
     src/fault_monitor.c, and src/main.cpp.
     """
     assert audit_code_constants() is True
+
+
+def test_staleness_detection_fails_on_source_mutation():
+    """
+    Regression test (Round-8 Item 3):
+    Verifies that mutating source code (e.g. fault_monitor.c) alters the
+    source fingerprint and causes an isolated run of test_pdf_integrity.py
+    in a temporary copy to FAIL with a clear message indicating stale evidence.
+    """
+    if os.environ.get("SKIP_STALENESS_SUBPROCESS") == "1":
+        return
+
+    import tempfile
+    import shutil
+    import subprocess
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Copy necessary workspace directories and files
+        for item in ["src", "simulation", "build", "pytest.ini", "build_pdf_guide.py", "docs"]:
+            src_path = os.path.join(BASE_DIR, item)
+            dst_path = os.path.join(tmpdir, item)
+            if os.path.isdir(src_path):
+                shutil.copytree(src_path, dst_path)
+            elif os.path.isfile(src_path):
+                shutil.copy2(src_path, dst_path)
+
+        # Mutate src/fault_monitor.c in the temp copy
+        fm_path = os.path.join(tmpdir, "src", "fault_monitor.c")
+        with open(fm_path, "a") as f:
+            f.write("\n// STALENESS REGRESSION MUTATION FOR ROUND 8 TEST\n")
+
+        # Run only test_pdf_integrity.py in the mutated temp copy with recursion guard
+        sub_env = os.environ.copy()
+        sub_env["SKIP_STALENESS_SUBPROCESS"] = "1"
+        cmd = [sys.executable, "-m", "pytest", "simulation/test_pdf_integrity.py", "-v"]
+        res = subprocess.run(cmd, cwd=tmpdir, env=sub_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        # Assert that the test run FAILS
+        assert res.returncode != 0, (
+            "Expected test_pdf_integrity.py to fail after mutating fault_monitor.c, but it passed!"
+        )
+        combined_output = res.stdout + res.stderr
+        assert (
+            "stale" in combined_output.lower()
+            or "fingerprint" in combined_output.lower()
+            or "missing" in combined_output.lower()
+            or "failed" in combined_output.lower()
+        ), f"Expected staleness or fingerprint failure indication, got output:\n{combined_output}"
