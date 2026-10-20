@@ -585,7 +585,7 @@ def build_pdf():
     story.append(Spacer(1, 10))
 
     if os.path.exists("docs/figures/fig5_state_machine.png"):
-        story.append(Image("docs/figures/fig5_state_machine.png", width=520, height=195))
+        story.append(Image("docs/figures/fig5_state_machine.png", width=520, height=217))
         story.append(Paragraph("<b>Figure 5:</b> Sensorless FOC Fault-Tolerant State Machine transition flow between operational modes.", styles['FigCaption']))
 
     story.append(PageBreak())

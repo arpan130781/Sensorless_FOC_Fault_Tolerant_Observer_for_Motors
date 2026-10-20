@@ -241,73 +241,78 @@ def generate_fig4():
 # Figure 5: Controller State Machine & Safe Operation Flow
 # -----------------------------------------------------------------------------
 def generate_fig5():
-    fig, ax = plt.subplots(figsize=(11, 4.2), dpi=300)
-    ax.set_xlim(0, 11)
-    ax.set_ylim(0, 4.2)
+    fig, ax = plt.subplots(figsize=(11.5, 4.8), dpi=300)
+    ax.set_xlim(0, 11.5)
+    ax.set_ylim(0, 4.8)
     ax.axis('off')
-    ax.set_title("Sensorless FOC Operational State Machine & Fault-Tolerant Transitions", 
-                 fontsize=12, fontweight='bold', color='#0F172A', pad=12)
+    
+    # Title & Subtitle
+    ax.text(5.75, 4.55, "Sensorless FOC Operational State Machine & Fault-Tolerant Transitions", 
+            fontsize=12, fontweight='bold', color='#0F172A', ha='center', va='center')
+    ax.text(5.75, 4.35, "Fail-operational architecture: single-fault ride-through (Mode 3), ambiguous fault derating (Mode 4), and fail-safe latch (Mode 5)", 
+            fontsize=7.5, color='#64748B', ha='center', va='center', style='italic')
     
     # State Boxes: (x, y, w, h, text, bg, border, text_color)
     states = [
-        # Top Row: Normal progression
-        (0.4, 2.5, 1.6, 1.1, 'ALIGN (0)\nDC current hold\nlocks rotor to 0°', '#F1F5F9', '#475569', '#334155'),
-        (2.5, 2.5, 1.7, 1.1, 'OPEN LOOP (1)\nI-F rotating ramp\n0 -> 500 RPM', '#FEF3C7', '#D97706', '#92400E'),
-        (4.7, 2.5, 1.8, 1.1, 'CLOSED LOOP (2)\nFull 3-Shunt FOC\nSMO angle tracking', '#DCFCE7', '#16A34A', '#166534'),
-        (7.1, 2.5, 1.8, 1.1, 'DEGRADED (3)\n2-Shunt Operation\nReconstructed phase', '#DBEAFE', '#2563EB', '#1E40AF'),
+        # Top Row: Normal Progression & Fail-Operational (y: 2.9 to 4.1)
+        (0.5, 2.9, 1.6, 1.2, 'ALIGN (0)\n\nDC current hold\nlocks rotor to 0°', '#F8FAFC', '#64748B', '#1E293B'),
+        (2.7, 2.9, 1.7, 1.2, 'OPEN LOOP (1)\n\nI-F rotating ramp\n0 -> 500 RPM', '#FEF3C7', '#D97706', '#92400E'),
+        (5.1, 2.9, 2.1, 1.2, 'CLOSED LOOP (2)\n\nFull 3-Shunt FOC\nSMO angle tracking', '#DCFCE7', '#16A34A', '#166534'),
+        (9.0, 2.9, 2.1, 1.2, 'DEGRADED (3)\n\nFail-operational 2-shunt\nReconstructed phase', '#DBEAFE', '#2563EB', '#1E40AF'),
         
-        # Bottom Row: Degraded / Emergency states
-        (4.7, 0.5, 1.8, 1.1, 'LIMP (4)\nAmbiguous fault\n50% speed/current derate', '#F3E8FF', '#9333EA', '#6B21A8'),
-        (9.2, 1.4, 1.5, 1.4, 'SAFE STOP (5)\nGates disabled\nBody-diode conduction\nTerminal latch', '#FEE2E2', '#DC2626', '#991B1B')
+        # Bottom Row: Ambiguous Derating & Terminal Fail-Safe (y: 0.5 to 1.7)
+        (5.1, 0.5, 2.1, 1.2, 'LIMP (4)\n\nAmbiguous fault\n50% speed / current derate', '#F3E8FF', '#9333EA', '#6B21A8'),
+        (9.0, 0.5, 2.1, 1.2, 'SAFE STOP (5)\n\nGates disabled (LOW)\nDiode freewheeling stop', '#FEE2E2', '#DC2626', '#991B1B')
     ]
     
     for x, y, w, h, text, bg, border, tc in states:
-        rect = patches.FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.08,rounding_size=0.15",
-                                      facecolor=bg, edgecolor=border, lw=1.8)
+        rect = patches.FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.06,rounding_size=0.12",
+                                      facecolor=bg, edgecolor=border, lw=2.0)
         ax.add_patch(rect)
         ax.text(x + w/2, y + h/2, text, color=tc, fontsize=8.2, fontweight='bold',
                 ha='center', va='center', multialignment='center')
         
     # 1. ALIGN -> OPEN_LOOP
-    ax.annotate('', xy=(2.5, 3.05), xytext=(2.0, 3.05),
+    ax.annotate('', xy=(2.7, 3.5), xytext=(2.1, 3.5),
                 arrowprops=dict(arrowstyle="->", color='#0F172A', lw=1.8, mutation_scale=12))
-    ax.text(2.25, 3.22, 'Time > 500ms', fontsize=7.5, ha='center', color='#475569', fontweight='bold')
+    ax.text(2.4, 3.68, 'Time > 500ms', fontsize=7.2, ha='center', color='#475569', fontweight='bold')
     
     # 2. OPEN_LOOP -> CLOSED_LOOP
-    ax.annotate('', xy=(4.7, 3.05), xytext=(4.2, 3.05),
+    ax.annotate('', xy=(5.1, 3.5), xytext=(4.4, 3.5),
                 arrowprops=dict(arrowstyle="->", color='#0F172A', lw=1.8, mutation_scale=12))
-    ax.text(4.45, 3.22, 'Lock error < 15°', fontsize=7.5, ha='center', color='#475569', fontweight='bold')
+    ax.text(4.75, 3.68, 'Lock err < 15°', fontsize=7.2, ha='center', color='#475569', fontweight='bold')
     
     # 3. CLOSED_LOOP -> DEGRADED (Forward single fault)
-    ax.annotate('', xy=(7.1, 3.2), xytext=(6.5, 3.2),
+    ax.annotate('', xy=(9.0, 3.75), xytext=(7.2, 3.75),
                 arrowprops=dict(arrowstyle="->", color='#2563EB', lw=1.8, mutation_scale=12))
-    ax.text(6.8, 3.37, 'Single Sensor Fault', fontsize=7.5, ha='center', color='#2563EB', fontweight='bold')
+    ax.text(8.1, 3.92, 'Single Sensor Fault', fontsize=7.5, ha='center', color='#2563EB', fontweight='bold')
     
-    # 4. DEGRADED -> CLOSED_LOOP (Recovery arc underneath)
-    ax.annotate('', xy=(6.5, 2.75), xytext=(7.1, 2.75),
-                arrowprops=dict(arrowstyle="->", color='#16A34A', lw=1.8, ls='--', connectionstyle="arc3,rad=0.35", mutation_scale=12))
-    ax.text(6.8, 2.38, 'Fault Clears > 500ms', fontsize=7.2, ha='center', color='#16A34A', fontweight='bold')
+    # 4. DEGRADED -> CLOSED_LOOP (Recovery)
+    ax.annotate('', xy=(7.2, 3.25), xytext=(9.0, 3.25),
+                arrowprops=dict(arrowstyle="->", color='#16A34A', lw=1.8, ls='--', mutation_scale=12))
+    ax.text(8.1, 3.07, 'Fault Clears > 500ms (Recover)', fontsize=7.2, ha='center', color='#16A34A', fontweight='bold')
     
-    # 5. CLOSED_LOOP -> LIMP (Ambiguous fault down)
-    ax.annotate('', xy=(5.6, 1.6), xytext=(5.6, 2.5),
+    # 5. CLOSED_LOOP -> LIMP (Vertical down)
+    ax.annotate('', xy=(5.7, 1.7), xytext=(5.7, 2.9),
                 arrowprops=dict(arrowstyle="->", color='#9333EA', lw=1.8, mutation_scale=12))
-    ax.text(5.65, 2.05, ' Ambiguous Fault\n (Unresolved phase)', fontsize=7.2, ha='left', va='center', color='#9333EA', fontweight='bold')
+    ax.text(5.62, 2.30, 'Ambiguous Fault\n(Unresolved phase)', fontsize=7.2, ha='right', va='center', color='#9333EA', fontweight='bold')
     
-    # 6. LIMP -> SAFE_STOP (Timeout > 200ms)
-    ax.annotate('', xy=(9.2, 1.8), xytext=(6.5, 1.05),
-                arrowprops=dict(arrowstyle="->", color='#9333EA', lw=1.6, ls='--', connectionstyle="arc3,rad=-0.15", mutation_scale=12))
-    ax.text(7.6, 1.25, 'Timeout > 200ms', fontsize=7.2, ha='center', color='#9333EA', fontweight='bold')
+    # 6. DEGRADED -> SAFE_STOP (Vertical down)
+    ax.annotate('', xy=(10.5, 1.7), xytext=(10.5, 2.9),
+                arrowprops=dict(arrowstyle="->", color='#DC2626', lw=1.8, mutation_scale=12))
+    ax.text(10.58, 2.30, '2nd Sensor Fault\n(Reconstruction lost)', fontsize=7.2, ha='left', va='center', color='#DC2626', fontweight='bold')
     
-    # 7. DEGRADED -> SAFE_STOP (Second fault)
-    ax.annotate('', xy=(9.2, 2.3), xytext=(8.9, 2.8),
-                arrowprops=dict(arrowstyle="->", color='#DC2626', lw=1.8, connectionstyle="arc3,rad=-0.2", mutation_scale=12))
-    ax.text(8.8, 2.95, '2nd Sensor Fault', fontsize=7.5, ha='center', color='#DC2626', fontweight='bold')
+    # 7. LIMP -> SAFE_STOP (Horizontal)
+    ax.annotate('', xy=(9.0, 1.1), xytext=(7.2, 1.1),
+                arrowprops=dict(arrowstyle="->", color='#9333EA', lw=1.8, ls='--', mutation_scale=12))
+    ax.text(8.1, 1.28, 'Timeout > 200ms', fontsize=7.5, ha='center', color='#9333EA', fontweight='bold')
     
-    # 8. CLOSED_LOOP -> SAFE_STOP (Critical Inverter Fault / Overrun arc over top)
-    ax.annotate('', xy=(9.95, 2.8), xytext=(5.6, 3.6),
-                arrowprops=dict(arrowstyle="->", color='#DC2626', lw=1.8, ls=':', connectionstyle="arc3,rad=-0.35", mutation_scale=12))
-    ax.text(7.8, 3.95, 'Critical Inverter Fault / Leg Open / >3 Missed Ticks', 
-            fontsize=7.5, ha='center', color='#DC2626', fontweight='bold')
+    # 8. CLOSED_LOOP -> SAFE_STOP (Critical Inverter Fault / Task Overrun)
+    ax.annotate('', xy=(9.0, 1.7), xytext=(7.2, 2.9),
+                arrowprops=dict(arrowstyle="->", color='#DC2626', lw=1.8, ls=':', mutation_scale=12))
+    ax.text(8.1, 2.30, 'Critical Inverter Fault / Leg Open\n>3 Missed Ticks (Task Overrun)', 
+            fontsize=7.2, ha='center', va='center', color='#DC2626', fontweight='bold',
+            bbox=dict(boxstyle='round,pad=0.25', facecolor='#FEF2F2', edgecolor='#DC2626', lw=1.2, ls=':'))
     
     plt.tight_layout()
     plt.savefig("docs/figures/fig5_state_machine.png", dpi=300, bbox_inches='tight')
