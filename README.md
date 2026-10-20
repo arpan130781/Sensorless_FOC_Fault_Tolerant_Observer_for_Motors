@@ -644,9 +644,11 @@ Alternatively, measure the volt-second loss directly on the spinning or stationa
 5. Calculate the equivalent controller parameter:
    $$t_{dead} = \frac{V_{dead}}{f_{pwm} \cdot V_{bus}}$$
 
-#### Step 3: Configuring the Firmware
-- In [`src/motor_params.h`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/motor_params.h), update `CTRL_PARAM_DEAD_TIME` with the commissioned value (e.g. `1.0416667e-6f` for 0.5 V distortion at 20 kHz / 24 V).
-- **Warning for Uncommissioned Hardware:** If deploying to uncharacterized hardware where $t_{dead}$ is unknown, configure `ctrl.dead_time = 0.0f`. An uncompensated inverter causes moderate phase error (~6–7°), whereas over-compensation (assuming 0.5 V on an inverter with 0.0 V dead-time) causes parasitic square-wave zero-crossing chatter and severe angle degradation (~19.3°).
+#### Step 3: Configuring the Firmware & SIL Roles
+- **Firmware Default (Safe for Uncommissioned Hardware):** In [`src/motor_params.h`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/motor_params.h), `CTRL_PARAM_DEAD_TIME` defaults to `0.0f` unless `-DDEAD_TIME_COMMISSIONED_S=<seconds>` is provided at build time. When uncommissioned, the build emits a compiler `#warning` alerting developers that compensation is disabled.
+- **Commissioning Firmware:** Once the physical inverter dead-time is measured, pass `-DDEAD_TIME_COMMISSIONED_S=<value>` in `platformio.ini` `build_flags` (e.g. `-DDEAD_TIME_COMMISSIONED_S=1.0416667e-6f` for 0.5 V distortion at 20 kHz / 24 V).
+- **SIL Simulation Default:** In [`simulation/harness/config.py`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/simulation/harness/config.py), the simulator explicitly sets `SIM_DEAD_TIME = 1.0416667e-6 s` to match the simulated inverter plant's 0.5 V diode drop model, isolating SIL benchmarking from uncommissioned firmware defaults.
+- **Warning for Uncommissioned Hardware:** An uncompensated inverter causes moderate phase error (~6–7°), whereas over-compensation (assuming 0.5 V on an inverter with 0.0 V dead-time) causes parasitic square-wave zero-crossing chatter and severe angle degradation (~19.3°). Operating with `dead_time = 0.0f` until commissioning is completed guarantees safe, chatter-free operation.
 
 ## 9.3 Fault Injection
 

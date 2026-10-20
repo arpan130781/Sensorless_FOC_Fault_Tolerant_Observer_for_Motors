@@ -77,3 +77,23 @@ def test_dead_time_parameter_configuration_zero_recovery():
     mask = res.time >= 1.5
     max_err = float(np.max(np.abs(res.angle_error[mask])))
     assert max_err < 1.0, f"Angle error with zero dead-time compensation failed to recover: {max_err:.2f} deg"
+
+
+def test_dead_time_firmware_and_sil_defaults():
+    """
+    Round-5 Task 1 Regression Test:
+    Asserts that:
+    1. Firmware default dead_time is 0.0 s (safe on uncommissioned hardware).
+    2. SIL simulation default dead_time is the explicit simulator value (SIM_DEAD_TIME = 1.0416667e-6 s, 0.5 V).
+    """
+    from simulation.harness.config import SIM_DEAD_TIME, PATHS
+    from simulation.harness.c_bridge import FocController
+
+    # 1. Assert SIL default matches explicit simulator constant (0.5 V equivalent)
+    assert SIM_DEAD_TIME == pytest.approx(1.0416667e-6, rel=1e-5)
+    assert CONTROLLER_PARAMS['dead_time'] == pytest.approx(SIM_DEAD_TIME, rel=1e-5)
+
+    # 2. Assert firmware C default from get_default_controller_params() is 0.0 s
+    ctrl = FocController(PATHS['lib_path'])
+    c_def = ctrl.get_default_controller_params()
+    assert c_def.dead_time == 0.0, f"Expected firmware default dead_time=0.0 s, got {c_def.dead_time}"

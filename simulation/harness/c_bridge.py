@@ -65,6 +65,9 @@ class ControllerParams(ctypes.Structure):
         ("dead_time", ctypes.c_float)
     ]
 
+from simulation.harness.config import SIM_DEAD_TIME
+
+
 class FocController:
     def __init__(self, lib_path):
         if not os.path.exists(lib_path):
@@ -83,9 +86,13 @@ class FocController:
         m = MotorParams(**motor_dict)
         c_dict = dict(ctrl_dict)
         if 'dead_time' not in c_dict:
-            c_dict['dead_time'] = 1.0416667e-6
+            c_dict['dead_time'] = SIM_DEAD_TIME
         c = ControllerParams(**c_dict)
         self.lib.foc_init(ctypes.byref(m), ctypes.byref(c))
+
+    def get_default_controller_params(self):
+        self.lib.foc_get_default_controller_params.restype = ControllerParams
+        return self.lib.foc_get_default_controller_params()
         
     def tick(self, i_a, i_b, i_c, v_bus):
         inp = FocInput(i_a, i_b, i_c, v_bus)

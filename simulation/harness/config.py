@@ -18,6 +18,9 @@ MOTOR_PARAMS = {
     'In': 5.0
 }
 
+# Explicit SIL simulation dead-time (compensating the simulator's 0.5 V plant distortion: 0.5 / (20000 * 24) = 1.0416667e-6 s)
+SIM_DEAD_TIME = 1.0416667e-6
+
 CONTROLLER_PARAMS = {
     'id_kp': 6.28,
     'id_ki': 3142.0,
@@ -33,7 +36,7 @@ CONTROLLER_PARAMS = {
     'pwm_freq': 20000.0,
     'ctrl_rate_curr': 20000.0,
     'ctrl_rate_spd': 1000.0,
-    'dead_time': 1.0416667e-6
+    'dead_time': SIM_DEAD_TIME
 }
 
 if os.path.exists(_header_path):
@@ -66,7 +69,9 @@ if os.path.exists(_header_path):
         CONTROLLER_PARAMS['ctrl_rate_curr'] = float(_defines['CTRL_PARAM_CTRL_CURR'].rstrip('f'))
         CONTROLLER_PARAMS['ctrl_rate_spd'] = float(_defines['CTRL_PARAM_CTRL_SPD'].rstrip('f'))
     if 'CTRL_PARAM_DEAD_TIME' in _defines:
-        CONTROLLER_PARAMS['dead_time'] = float(_defines['CTRL_PARAM_DEAD_TIME'].rstrip('f'))
+        # Note: Do NOT overwrite SIL simulation dead-time with the uncommissioned firmware default (0.0).
+        # SIL simulation explicitly uses SIM_DEAD_TIME to match the simulated 0.5V inverter plant.
+        pass
 
 SIM_PARAMS = {
     'dt_control': 1.0 / CONTROLLER_PARAMS['pwm_freq'],

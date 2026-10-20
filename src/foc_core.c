@@ -1,4 +1,5 @@
 #include "foc_api.h"
+#include "motor_params.h"
 #include "pi_controller.h"
 #include "smo.h"
 #include "flux_observer.h"
@@ -367,4 +368,8 @@ FocOutput foc_tick(const FocInput* input) {
     out.confidence_flux = obs_mgr.confidence_flux;
     
     return out;
+}
+
+ControllerParams foc_get_default_controller_params(void) {
+    return get_default_controller_params();
 }

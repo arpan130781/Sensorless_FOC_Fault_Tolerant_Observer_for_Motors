@@ -53,6 +53,7 @@ IRAM_ATTR FocOutput foc_tick(const FocInput* input);
 void foc_reset(void);
 void foc_set_speed_ref(float omega_ref_rads);
 void foc_set_torque_ref(float iq_ref_A);
+ControllerParams foc_get_default_controller_params(void);
 
 /* Library Clarke and Park transforms (IRAM_ATTR for zero cache-miss latency) */
 IRAM_ATTR void clarke_transform(float a, float b, float c, float* alpha, float* beta);

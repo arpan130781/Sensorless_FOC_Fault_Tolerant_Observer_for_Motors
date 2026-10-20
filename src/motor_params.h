@@ -42,15 +42,19 @@
 #define CTRL_PARAM_CTRL_SPD     1000.0f     // Speed loop execution rate (Hz)
 
 // Inverter dead-time compensation (s):
-// [MUST BE COMMISSIONED FOR TARGET HARDWARE]
+// [FIRMWARE DEFAULT IS SAFE: 0.0s UNCOMMISSIONED]
 // Physical inverters drop phase voltage according to gate-driver switching dead-time:
 //   V_dead = dead_time * pwm_freq * V_bus
-// This parameter MUST BE COMMISSIONED for physical inverter hardware using the procedure
-// detailed in README.md ("Inverter Dead-Time Commissioning Procedure for Hardware Deployment").
-// For uncommissioned target hardware, set to 0.0f to avoid zero-crossing distortion.
-// In this reference configuration, it is pre-commissioned to the benchmark SIL plant model (0.5V):
-//   dead_time = 0.5V / (20000 Hz * 24.0V) = 1.0416667e-6 s.
-#define CTRL_PARAM_DEAD_TIME    1.0416667e-6f // [MUST BE COMMISSIONED] Pre-commissioned for 0.5V benchmark plant
+// On uncommissioned hardware, dead_time must default to 0.0s to avoid zero-crossing
+// over-compensation distortion (~19.3 deg error on 0V plant).
+// To commission for target hardware, define build flag -DDEAD_TIME_COMMISSIONED_S=<value>
+// (e.g. 1.0416667e-6f for 0.5V distortion at 20 kHz / 24V).
+#ifdef DEAD_TIME_COMMISSIONED_S
+#define CTRL_PARAM_DEAD_TIME    ((float)(DEAD_TIME_COMMISSIONED_S))
+#else
+#warning "Inverter dead-time is uncommissioned (DEAD_TIME_COMMISSIONED_S not defined). Defaulting dead_time to 0.0s for safe hardware operation."
+#define CTRL_PARAM_DEAD_TIME    0.0f
+#endif
 
 static inline MotorParams get_default_motor_params(void) {
     MotorParams p = {
