@@ -281,8 +281,9 @@ The repository includes a complete Simulink co-simulation environment in `simuli
 - **Compilation Flags:** `-I src -Wdouble-promotion -Werror=double-promotion`
 - **Compiler Warnings:** **0 warnings, 0 errors** under `-Wdouble-promotion`
 - **Static Firmware Image Size (Host Cross-Compilation):**
-  - RAM Usage: 22,204 bytes (6.8% of 320 KB)
-  - Flash Usage: 298,869 bytes (22.8% of 1.3 MB)
+  - RAM Usage: 22,212 bytes (6.8% of 327,680 bytes)
+  - Flash Usage: 299,225 bytes (22.8% of 1,310,720 bytes)
+  - Raw Build Log: [`docs/evidence/pio_build_20261020.log`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/docs/evidence/pio_build_20261020.log)
 - **On-Target Execution:** **NOT MEASURED - requires hardware** (cross-compilation verified on host; on-target flashing and physical execution profiling require hardware)
 - **Result:** **SUCCESS (Host Cross-Compilation)**
 

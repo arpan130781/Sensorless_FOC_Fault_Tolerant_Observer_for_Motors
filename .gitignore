@@ -18,6 +18,7 @@ build/
 *.tmp
 *.zip
 *.tar.gz
+!docs/evidence/**
 
 # Python
 __pycache__/

@@ -420,8 +420,9 @@ This section records the third-round audit findings, implemented engineering fix
 - **Firmware Compilation (ESP32 via PlatformIO, Host Cross-Compilation):**
   - Compiler Flags: `-Wdouble-promotion -Werror=double-promotion`
   - Status: **SUCCESS (0 warnings, 0 errors)**
-  - RAM Usage: 22,204 bytes (6.8% static ELF)
-  - Flash Usage: 298,869 bytes (22.8% static ELF)
+  - RAM Usage: 22,212 bytes (6.8% of 327,680 bytes)
+  - Flash Usage: 299,225 bytes (22.8% of 1,310,720 bytes)
+  - Raw Build Artifact: `docs/evidence/pio_build_20261020.log`
 - **Target Hardware Timing (GPIO 14 / `PIN_TIMING_BENCHMARK`):**
   - Status: **NOT MEASURED - requires hardware** (unmeasured on physical hardware; previous estimates of 0.8 $\mu\text{s}$ ISR, 4.5 $\mu\text{s}$ ADC, 14.2 $\mu\text{s}$ FOC, 18.7 $\mu\text{s}$ total removed per documentation integrity). Physical oscilloscope validation required.
 
@@ -539,6 +540,6 @@ This section records the fourth-round audit findings, implemented engineering fi
 
 ### Verification Metrics
 - **C Transform Unit Tests:** `make lib && make test` $\to$ **PASSED** (<$10^{-5}$ float round-trip invertibility).
-- **Embedded PlatformIO Build:** `pio run` $\to$ **SUCCESS** (RAM 6.8%, Flash 22.8%, 0 warnings with `-Wdouble-promotion -Werror=double-promotion`).
+- **Embedded PlatformIO Build:** `pio run` $\to$ **SUCCESS** (RAM 22,212 bytes / 6.8%, Flash 299,225 bytes / 22.8%, 0 warnings with `-Wdouble-promotion -Werror=double-promotion`; verified against raw log `docs/evidence/pio_build_20261020.log`).
 - **Complete Automated Test Suite:** `.venv/bin/python3 -m pytest simulation/ -q` $\to$ **122/122 PASSED (100%)** in 637.89s.
 
