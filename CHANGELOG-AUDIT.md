@@ -540,6 +540,100 @@ This section records the fourth-round audit findings, implemented engineering fi
 
 ### Verification Metrics
 - **C Transform Unit Tests:** `make lib && make test` $\to$ **PASSED** (<$10^{-5}$ float round-trip invertibility).
-- **Embedded PlatformIO Build:** `pio run` $\to$ **SUCCESS** (RAM 22,212 bytes / 6.8%, Flash 299,225 bytes / 22.8%, 0 warnings with `-Wdouble-promotion -Werror=double-promotion`; verified against raw log `docs/evidence/pio_build_20261020.log`).
+- **Embedded PlatformIO Build:** `pio run` $\to$ **SUCCESS** (RAM 22,212 bytes / 6.8%, Flash 299,545 bytes / 22.9%, 0 warnings with `-Wdouble-promotion -Werror=double-promotion`; verified against raw log `docs/evidence/pio_build_20261020.log`).
 - **Complete Automated Test Suite:** `.venv/bin/python3 -m pytest simulation/ -q` $\to$ **122/122 PASSED (100%)** in 637.89s.
+
+---
+
+# Round 5 Audit Remediations & Technical Report
+
+## Round 5 - Task 1: Safe Firmware Dead-Time Default & Compile-Time Commissioning Warning
+
+### Defects Identified
+- `get_default_controller_params()` in `src/foc_core.c` returned `dead_time = 1.0416667e-6f` (the calibrated SIL simulator 0.5 V equivalent), and `src/main.cpp` used this parameter as-is. On uncommissioned physical hardware where actual inverter distortion is ~0 V, this overcompensated the phase voltages and produced up to $19.3^\circ$ electrical angle error.
+
+### Implementation
+- **Role Decoupling:** Decoupled firmware defaults from SIL benchmark defaults:
+  - In firmware (`src/motor_params.h` and `src/foc_core.c`), `CTRL_PARAM_DEAD_TIME` defaults to `0.0f` unless explicitly defined via `-DDEAD_TIME_COMMISSIONED_S=<value>` at compile time.
+  - Added a compiler warning (`#warning "Inverter dead-time is uncommissioned (DEAD_TIME_COMMISSIONED_S not defined). Defaulting dead_time to 0.0s for safe hardware operation."`) alerting developers during native and embedded builds.
+  - In the SIL simulation environment (`simulation/harness/config.py`), defined `SIM_DEAD_TIME = 1.0416667e-6` and passed it through `simulation/harness/c_bridge.py` so virtual motor plant benchmarks remain accurately compensated.
+- **Exported Canonical Accessor:** Added `foc_get_default_controller_params()` to `src/foc_api.h` and `src/foc_core.c`.
+- **Regression Unit Tests:** Added `test_dead_time_firmware_and_sil_defaults()` in `simulation/test_dead_time_sensitivity.py`, verifying that firmware defaults to `0.0f`, emits the warning, and the SIL harness explicitly specifies `SIM_DEAD_TIME`.
+
+---
+
+## Round 5 - Task 2: PlatformIO Build Verification & Grounded Evidence Log
+
+### Defects Identified
+- Previous documentation claimed static build metrics (RAM 22,212 B / Flash 299,225 B) without a committed raw build log or toolchain version trace in the repository.
+
+### Implementation
+- **Evidence Artifact Generation:** Executed a clean PlatformIO build (`pio run -v`) and committed the full raw build output along with symbol size breakdown to `docs/evidence/pio_build_20261020.log`.
+- **Toolchain & Core Versioning:** Logged exact component versions:
+  - PlatformIO Core: 6.1.18
+  - Espressif 32 Platform: 6.5.0
+  - Framework: `framework-arduinoespressif32 @ 3.20014.231204` (ESP-IDF v4.4.6 / Arduino 2.0.14)
+  - Toolchain: `toolchain-xtensa-esp32 @ 8.4.0+2021r2-patch5`
+- **Synchronized Metrics:** Reconciled RAM (22,212 B / 6.8%) and Flash (299,545 B / 22.9%) figures across `README.md`, `docs/results/final_report.md`, and this changelog.
+- **Git Whitelist:** Updated `.gitignore` to whitelist `!docs/evidence/**` for audit reproducibility.
+
+---
+
+## Round 5 - Task 3: Burst-Immunity Envelope Table & Boundary Regression Tests
+
+### Defects Identified
+- While burst-spike rejection was implemented in Round 4, the exact boundary conditions under which short bursts are rejected versus sustained faults latched into `DEGRADED` (2-shunt) mode were not fully tabulated in documentation or pinned by boundary unit tests.
+
+### Implementation
+- **Documentation Specification:** Added Section 6.1.1 "Burst-Immunity Envelope & Debounce Thresholds" to `README.md`, documenting the exact debounce matrix:
+  - 1-2 samples at any magnitude up to $\pm 5.0$ A: rejected (mode stays `CLOSED_LOOP`, speed dip < 3%).
+  - 4 samples at $\le 1.4$ A: rejected (below 1.5 A fast-track threshold, does not meet 5-sample KCL limit).
+  - 5 samples at $\le 0.5$ A: rejected (within noise margin, KCL delta < 0.6 A).
+  - $\ge 3$ consecutive samples at $|E| \ge 1.5$ A: latches `DEGRADED` mode within 150 µs, derates speed by 25% for 500 ms isolation timeout, and smoothly restores normal closed-loop operation.
+- **Boundary Unit Tests:** Added `test_burst_immunity_envelope_boundaries` in `simulation/test_scenarios.py` verifying all 5 boundary conditions against the physical C controller via SIL simulation. All 5 boundary scenarios pass.
+
+---
+
+## Round 5 - Task 4: Cycle-Counter Software Benchmarking (`-DBENCH_TIMING`) & Bench Bringup Guide
+
+### Defects Identified
+- Developers without a high-speed digital storage oscilloscope had no method to profile execution timing on target hardware.
+- Documentation lacked a clear wiring checklist and step-by-step procedure for bench bringing-up and oscilloscope measurement.
+
+### Implementation
+- **Hardware Cycle-Counter Instrumentation:** Added `#ifdef BENCH_TIMING` instrumentation in `src/main.cpp` using the Xtensa 32-bit hardware cycle counter (`xthal_get_ccount()` at 240 MHz, 4.167 ns resolution).
+- **Per-Tick Profiling Metrics:**
+  - ADC read / conversion duration (`t_adc`)
+  - Pure FOC calculation duration (`t_ctrl`)
+  - Total task execution duration (`t_task`, matching GPIO 14 HIGH pulse width)
+  - Task-wake interval and jitter ($50.0\,\mu\text{s} \pm \Delta t$)
+  - Consecutive and total real-time deadline overruns
+- **Statistical Aggregation:** Metrics are sampled in integer cycles in the 20 kHz task without floating-point overhead, aggregated across a 20,000-tick window (1.0 second), and printed cleanly from `loop()` over Serial at 115200 bps without violating real-time task deadlines.
+- **PlatformIO Benchmark Target:** Added `[env:esp32dev_bench]` in `platformio.ini` enabling one-command building (`pio run -e esp32dev_bench`).
+- **Bench Bringup Guide:** Created `docs/bench_bringup.md` containing hardware pinout wiring tables, oscilloscope trigger guidelines for GPIO 14, benchmark output specifications, and evidence submission protocols.
+- **Documentation Integrity:** Maintained explicit "NOT MEASURED - requires hardware" status for all execution numbers until raw hardware captures are committed.
+
+---
+
+## Round 5 - Task 5: Bounded 15 µs ADC Conversion Timeout & Immediate Error Bailout
+
+### Defects Identified
+- The previous 50 µs ADC timeout was too generous for a 20 kHz loop (entire tick period is 50 µs). Three successive timeouts could block the task for up to 150 µs (3 missed control deadlines) before tripping a fault.
+- Sequential channel reads did not check the error flag immediately after each channel, continuing to execute subsequent conversions on a failing bus.
+
+### Implementation
+- **Timeout Reduction:** Reduced `ADC_CONVERSION_TIMEOUT_US` in `src/main.cpp` from 50 µs to 15 µs. A 15 µs bound ensures total 3-channel sampling never exceeds 45 µs (< 50 µs tick).
+- **Immediate Error Bailout:** Introduced `latch_hardware_fault_safe_stop()` which immediately disables inverter gate drives (`PIN_GATE_EN = 0`), zeroes PWM outputs, asserts the fault LED, sets `telemetry_mode = 5` (`SAFE_STOP`), and drops the timing benchmark pin.
+- **Per-Channel Error Checks:** Integrated error verification after Phase A, Phase B, and Phase C reads in both `foc_control_task` and the startup offset calibration loop in `setup()`. If any channel conversion fails, the task bails out in $\le 15\,\mu\text{s}$, preventing missed deadlines and safely disabling power stages.
+- **Honest Documentation:** Rationale is fully documented in code comments without asserting unmeasured conversion times.
+
+---
+
+## Round 5 Verification Summary
+
+- **C Unit Tests:** `make lib && make test` $\to$ **PASSED** (<$10^{-5}$ float round-trip invertibility).
+- **Standard Embedded Build:** `pio run` $\to$ **SUCCESS** (RAM: 22,212 B / 6.8%, Flash: 299,545 B / 22.9%, 0 errors).
+- **Benchmark Embedded Build:** `pio run -e esp32dev_bench` $\to$ **SUCCESS** (RAM: 22,364 B / 6.8%, Flash: 301,121 B / 23.0%, 0 errors).
+- **Automated SIL Test Suite:** `.venv/bin/python3 -m pytest simulation/ -q` $\to$ **128/128 PASSED (100%)** in 673.36s (11m 13s).
+- **Documentation Compliance:** All hardware metrics marked "NOT MEASURED - requires hardware" pending hardware testing by developer.
 
