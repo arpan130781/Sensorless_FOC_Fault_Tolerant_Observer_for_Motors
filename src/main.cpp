@@ -26,6 +26,37 @@ extern "C" {
     #include "motor_params.h"
 }
 
+#ifdef BENCH_TIMING
+#include <xtensa/hal.h>
+
+struct BenchTimingStats {
+    uint32_t min_cycles;
+    uint32_t max_cycles;
+    uint64_t sum_cycles;
+};
+
+struct BenchReport {
+    float adc_min_us, adc_avg_us, adc_max_us;
+    float ctrl_min_us, ctrl_avg_us, ctrl_max_us;
+    float task_min_us, task_avg_us, task_max_us;
+    float wake_min_us, wake_avg_us, wake_max_us;
+    float wake_jitter_us;
+    uint32_t consecutive_overruns;
+    uint32_t total_overruns;
+};
+
+static volatile bool g_bench_ready = false;
+static BenchReport g_bench_report;
+
+static BenchTimingStats stat_adc = { UINT32_MAX, 0, 0 };
+static BenchTimingStats stat_ctrl = { UINT32_MAX, 0, 0 };
+static BenchTimingStats stat_task = { UINT32_MAX, 0, 0 };
+static BenchTimingStats stat_wake = { UINT32_MAX, 0, 0 };
+static uint32_t g_bench_tick_count = 0;
+static uint32_t g_last_wake_ccount = 0;
+static bool g_first_wake = true;
+#endif
+
 // Latching hardware ADC fault flag
 static volatile bool g_adc_hardware_fault = false;
 
@@ -140,6 +171,20 @@ void foc_control_task(void *pvParameters) {
         // Block until notified by 20 kHz hardware timer ISR
         uint32_t notifies = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+#ifdef BENCH_TIMING
+        uint32_t c_wake = xthal_get_ccount();
+        uint32_t c_task_start = c_wake;
+        if (!g_first_wake) {
+            uint32_t wake_interval = c_wake - g_last_wake_ccount;
+            if (wake_interval < stat_wake.min_cycles) stat_wake.min_cycles = wake_interval;
+            if (wake_interval > stat_wake.max_cycles) stat_wake.max_cycles = wake_interval;
+            stat_wake.sum_cycles += wake_interval;
+        } else {
+            g_first_wake = false;
+        }
+        g_last_wake_ccount = c_wake;
+#endif
+
         // Real-time overrun detection: count and flag missed deadlines
         if (notifies > 1) {
             uint32_t missed = notifies - 1;
@@ -167,6 +212,10 @@ void foc_control_task(void *pvParameters) {
 
         bool use_virtual_motor = (gpio_get_level((gpio_num_t)PIN_SW_MODE) == 0);
         bool inject_fault = (gpio_get_level((gpio_num_t)PIN_BTN_FAULT) == 0);
+
+#ifdef BENCH_TIMING
+        uint32_t c_adc_start = xthal_get_ccount();
+#endif
 
         if (use_virtual_motor) {
             // Compute phase currents from virtual PMSM state using library transforms
@@ -205,6 +254,11 @@ void foc_control_task(void *pvParameters) {
             ic = (c_raw - adc_offset_c) * CURRENT_SCALE;
         }
 
+#ifdef BENCH_TIMING
+        uint32_t c_adc_end = xthal_get_ccount();
+        uint32_t dt_adc = c_adc_end - c_adc_start;
+#endif
+
         FocInput foc_in = {
             .i_a = ia,
             .i_b = ib,
@@ -213,7 +267,14 @@ void foc_control_task(void *pvParameters) {
         };
 
         // Execute FOC Control Step (IRAM_ATTR on all callees)
+#ifdef BENCH_TIMING
+        uint32_t c_ctrl_start = xthal_get_ccount();
+#endif
         FocOutput foc_out = foc_tick(&foc_in);
+#ifdef BENCH_TIMING
+        uint32_t c_ctrl_end = xthal_get_ccount();
+        uint32_t dt_ctrl = c_ctrl_end - c_ctrl_start;
+#endif
 
         // Apply PWM outputs safely clamped to [0.0f, 1.0f], or disable gates on SAFE_STOP
         if (foc_out.gate_enable) {
@@ -270,6 +331,61 @@ void foc_control_task(void *pvParameters) {
         telemetry_ib = ib;
         telemetry_ic = ic;
         portEXIT_CRITICAL(&telemetryMux);
+
+#ifdef BENCH_TIMING
+        uint32_t c_task_end = xthal_get_ccount();
+        uint32_t dt_task = c_task_end - c_task_start;
+
+        if (dt_adc < stat_adc.min_cycles) stat_adc.min_cycles = dt_adc;
+        if (dt_adc > stat_adc.max_cycles) stat_adc.max_cycles = dt_adc;
+        stat_adc.sum_cycles += dt_adc;
+
+        if (dt_ctrl < stat_ctrl.min_cycles) stat_ctrl.min_cycles = dt_ctrl;
+        if (dt_ctrl > stat_ctrl.max_cycles) stat_ctrl.max_cycles = dt_ctrl;
+        stat_ctrl.sum_cycles += dt_ctrl;
+
+        if (dt_task < stat_task.min_cycles) stat_task.min_cycles = dt_task;
+        if (dt_task > stat_task.max_cycles) stat_task.max_cycles = dt_task;
+        stat_task.sum_cycles += dt_task;
+
+        g_bench_tick_count++;
+        if (g_bench_tick_count >= 20000) {
+            float cpu_freq = (float)ESP.getCpuFreqMHz();
+            if (cpu_freq <= 0.0f) {
+                cpu_freq = 240.0f;
+            }
+            double n = (double)g_bench_tick_count;
+
+            g_bench_report.adc_min_us = (float)stat_adc.min_cycles / cpu_freq;
+            g_bench_report.adc_avg_us = (float)((double)stat_adc.sum_cycles / n) / cpu_freq;
+            g_bench_report.adc_max_us = (float)stat_adc.max_cycles / cpu_freq;
+
+            g_bench_report.ctrl_min_us = (float)stat_ctrl.min_cycles / cpu_freq;
+            g_bench_report.ctrl_avg_us = (float)((double)stat_ctrl.sum_cycles / n) / cpu_freq;
+            g_bench_report.ctrl_max_us = (float)stat_ctrl.max_cycles / cpu_freq;
+
+            g_bench_report.task_min_us = (float)stat_task.min_cycles / cpu_freq;
+            g_bench_report.task_avg_us = (float)((double)stat_task.sum_cycles / n) / cpu_freq;
+            g_bench_report.task_max_us = (float)stat_task.max_cycles / cpu_freq;
+
+            g_bench_report.wake_min_us = (float)stat_wake.min_cycles / cpu_freq;
+            g_bench_report.wake_avg_us = (float)((double)stat_wake.sum_cycles / n) / cpu_freq;
+            g_bench_report.wake_max_us = (float)stat_wake.max_cycles / cpu_freq;
+            g_bench_report.wake_jitter_us = fmaxf(fabsf(g_bench_report.wake_max_us - 50.0f),
+                                                  fabsf(g_bench_report.wake_min_us - 50.0f));
+
+            g_bench_report.consecutive_overruns = overrun_counter;
+            g_bench_report.total_overruns = total_overruns;
+
+            stat_adc.min_cycles = UINT32_MAX; stat_adc.max_cycles = 0; stat_adc.sum_cycles = 0;
+            stat_ctrl.min_cycles = UINT32_MAX; stat_ctrl.max_cycles = 0; stat_ctrl.sum_cycles = 0;
+            stat_task.min_cycles = UINT32_MAX; stat_task.max_cycles = 0; stat_task.sum_cycles = 0;
+            stat_wake.min_cycles = UINT32_MAX; stat_wake.max_cycles = 0; stat_wake.sum_cycles = 0;
+            g_bench_tick_count = 0;
+
+            g_bench_ready = true;
+        }
+#endif
 
         gpio_set_level((gpio_num_t)PIN_TIMING_BENCHMARK, 0);
     }
@@ -426,6 +542,24 @@ void loop() {
     Serial.print("Health_%:");  Serial.print(t_health * 100.0f, 1); Serial.print("\t");
     Serial.print("Mode:");      Serial.print(t_mode); Serial.print("\t");
     Serial.print("Ia_Amps:");   Serial.println(t_ia, 2);
+
+#ifdef BENCH_TIMING
+    if (g_bench_ready) {
+        g_bench_ready = false;
+        Serial.println("\n--- [BENCH_TIMING (20000 ticks / 1 s)] ---");
+        Serial.printf("ADC Read:      min: %6.2f us | avg: %6.2f us | max: %6.2f us\n",
+                      (double)g_bench_report.adc_min_us, (double)g_bench_report.adc_avg_us, (double)g_bench_report.adc_max_us);
+        Serial.printf("Control Step:  min: %6.2f us | avg: %6.2f us | max: %6.2f us\n",
+                      (double)g_bench_report.ctrl_min_us, (double)g_bench_report.ctrl_avg_us, (double)g_bench_report.ctrl_max_us);
+        Serial.printf("Total Task:    min: %6.2f us | avg: %6.2f us | max: %6.2f us\n",
+                      (double)g_bench_report.task_min_us, (double)g_bench_report.task_avg_us, (double)g_bench_report.task_max_us);
+        Serial.printf("Wake Period:   min: %6.2f us | avg: %6.2f us | max: %6.2f us (Jitter: +/-%.2f us)\n",
+                      (double)g_bench_report.wake_min_us, (double)g_bench_report.wake_avg_us, (double)g_bench_report.wake_max_us, (double)g_bench_report.wake_jitter_us);
+        Serial.printf("Overruns:      consecutive: %u | total: %u\n",
+                      g_bench_report.consecutive_overruns, g_bench_report.total_overruns);
+        Serial.println("------------------------------------------");
+    }
+#endif
 
     delay(100);
 }
