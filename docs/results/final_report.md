@@ -283,7 +283,7 @@ The repository includes a complete Simulink co-simulation environment in `simuli
 - **Static Firmware Image Size (Host Cross-Compilation):**
   - RAM Usage: 22,212 bytes (6.8% of 327,680 bytes)
   - Flash Usage: 299,545 bytes (22.9% of 1,310,720 bytes)
-  - Raw Build Log: [`docs/evidence/pio_build_20261020.log`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/docs/evidence/pio_build_20261020.log)
+  - Raw Build Log: [`docs/evidence/pio_build_clean_20261020.log`](../evidence/pio_build_clean_20261020.log) and [`docs/evidence/pio_build_bench_20261020.log`](../evidence/pio_build_bench_20261020.log)
 - **On-Target Execution:** **NOT MEASURED - requires hardware** (cross-compilation verified on host; on-target flashing and physical execution profiling require hardware)
 - **Result:** **SUCCESS (Host Cross-Compilation)**
 
@@ -308,7 +308,7 @@ While the control algorithms and software simulations have been fully verified, 
    - In physical three-phase inverters, phase currents must be sampled precisely at the center of the zero-voltage vector ($V_0$ or $V_7$) to avoid switching noise and ringing.
    - On the ESP32, hardware timer synchronization via MCPWM capture/compare or I2S/DMA ADC triggering must be validated using an oscilloscope.
 2. **Physical Dead-Time Compensation & Parameter Mismatch Sensitivity:**
-   - The simulation models dead-time voltage drops ($V_{dead} \cdot \text{sign}(i)$), parameterized via $V_{dead} = t_{dead} \cdot f_{pwm} \cdot V_{bus}$ in [`src/motor_params.h`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/motor_params.h).
+   - The simulation models dead-time voltage drops ($V_{dead} \cdot \text{sign}(i)$), parameterized via $V_{dead} = t_{dead} \cdot f_{pwm} \cdot V_{bus}$ in [`src/motor_params.h`](../../src/motor_params.h).
    - SIL sensitivity sweeps across plant dead-times with a controller assuming 0.50 V ($t_{dead} = 1.042\,\mu\text{s}$) yield:
      - $V_{dead} = 0.50\,\text{V}$ (matched): **0.49°** max angle error.
      - $V_{dead} = 0.25\,\text{V}$: **6.49°** max angle error.

@@ -51,6 +51,8 @@
 // (e.g. 1.0416667e-6f for 0.5V distortion at 20 kHz / 24V).
 #ifdef DEAD_TIME_COMMISSIONED_S
 #define CTRL_PARAM_DEAD_TIME    ((float)(DEAD_TIME_COMMISSIONED_S))
+#elif defined(SIL_BUILD)
+#define CTRL_PARAM_DEAD_TIME    0.0f
 #else
 #warning "Inverter dead-time is uncommissioned (DEAD_TIME_COMMISSIONED_S not defined). Defaulting dead_time to 0.0s for safe hardware operation."
 #define CTRL_PARAM_DEAD_TIME    0.0f

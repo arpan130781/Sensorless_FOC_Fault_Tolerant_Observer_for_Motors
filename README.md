@@ -390,7 +390,7 @@ The threshold therefore requires validation against the actual measurement syste
 
 ### 6.1.1 Burst-Immunity Envelope & Debounce Thresholds
 
-To prevent spurious fault latching from high-frequency ADC noise spikes, EMI glitches, and inverter switching transients, the KCL residual monitor implements a two-tier consecutive-sample debounce envelope in [`src/fault_monitor.c`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/fault_monitor.c):
+To prevent spurious fault latching from high-frequency ADC noise spikes, EMI glitches, and inverter switching transients, the KCL residual monitor implements a two-tier consecutive-sample debounce envelope in [`src/fault_monitor.c`](src/fault_monitor.c):
 1. **Standard Residual Track ($0.3\text{ A} < |E| \le 1.5\text{ A}$):** Requires $N \ge 5$ consecutive exceedance samples ($250\,\mu\text{s}$ at $20\,\text{kHz}$) before declaring a fault candidate.
 2. **Severe Residual Fast Track ($|E| > 1.5\text{ A}$):** Requires $N \ge 3$ consecutive exceedance samples ($150\,\mu\text{s}$ at $20\,\text{kHz}$) to accelerate genuine fault isolation under massive short/saturation events while rejecting short transient spikes.
 3. **Immediate Debounce Reset:** If the KCL residual drops below $0.3\text{ A}$ on any sample, the exceedance counter resets to zero immediately.
@@ -651,7 +651,7 @@ SIL results are evidence about the simulated system, not proof of performance on
 
 ### Inverter Dead-Time Compensation & Mismatch Sensitivity
 
-The controller derives its feedforward dead-time voltage compensation from canonical parameters in [`src/motor_params.h`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/motor_params.h):
+The controller derives its feedforward dead-time voltage compensation from canonical parameters in [`src/motor_params.h`](src/motor_params.h):
 $$V_{dead} = t_{dead} \cdot f_{pwm} \cdot V_{bus}$$
 For $t_{dead} = 1.0417\,\mu\text{s}$, $f_{pwm} = 20\,\text{kHz}$, and $V_{bus} = 24.0\,\text{V}$, $V_{dead} = 0.50\,\text{V}$.
 
@@ -671,7 +671,7 @@ SIL sensitivity testing across plant dead-times against a controller configured 
 In real three-phase voltage source inverters (VSI), gate drivers insert a non-overlap blanking time ($t_{dead}$) between complementary MOSFET/IGBT switches in each phase leg to prevent DC link shoot-through. During this dead-time, output phase voltage is determined solely by the sign of the phase current through the freewheeling body diodes, inducing an average fundamental voltage loss:
 $$V_{dead} = t_{dead} \cdot f_{pwm} \cdot V_{bus} \cdot \text{sign}(i_{phase})$$
 
-Because dead-time distortion produces 5th and 7th harmonic voltages and degrades observer angle tracking around zero-crossings, the controller includes feedforward compensation parameterized by `ctrl.dead_time` in [`src/motor_params.h`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/motor_params.h). To commission this value on physical inverter hardware:
+Because dead-time distortion produces 5th and 7th harmonic voltages and degrades observer angle tracking around zero-crossings, the controller includes feedforward compensation parameterized by `ctrl.dead_time` in [`src/motor_params.h`](src/motor_params.h). To commission this value on physical inverter hardware:
 
 #### Step 1: Physical Dead-Time Measurement via Oscilloscope
 1. Connect high-bandwidth isolated differential probes to the high-side gate (GH) and low-side gate (GL) of Phase A relative to the phase switch-node.
@@ -691,9 +691,9 @@ Alternatively, measure the volt-second loss directly on the spinning or stationa
    $$t_{dead} = \frac{V_{dead}}{f_{pwm} \cdot V_{bus}}$$
 
 #### Step 3: Configuring the Firmware & SIL Roles
-- **Firmware Default (Safe for Uncommissioned Hardware):** In [`src/motor_params.h`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/motor_params.h), `CTRL_PARAM_DEAD_TIME` defaults to `0.0f` unless `-DDEAD_TIME_COMMISSIONED_S=<seconds>` is provided at build time. When uncommissioned, the build emits a compiler `#warning` alerting developers that compensation is disabled.
+- **Firmware Default (Safe for Uncommissioned Hardware):** In [`src/motor_params.h`](src/motor_params.h), `CTRL_PARAM_DEAD_TIME` defaults to `0.0f` unless `-DDEAD_TIME_COMMISSIONED_S=<seconds>` is provided at build time. When uncommissioned, the build emits a compiler `#warning` alerting developers that compensation is disabled.
 - **Commissioning Firmware:** Once the physical inverter dead-time is measured, pass `-DDEAD_TIME_COMMISSIONED_S=<value>` in `platformio.ini` `build_flags` (e.g. `-DDEAD_TIME_COMMISSIONED_S=1.0416667e-6f` for 0.5 V distortion at 20 kHz / 24 V).
-- **SIL Simulation Default:** In [`simulation/harness/config.py`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/simulation/harness/config.py), the simulator explicitly sets `SIM_DEAD_TIME = 1.0416667e-6 s` to match the simulated inverter plant's 0.5 V diode drop model, isolating SIL benchmarking from uncommissioned firmware defaults.
+- **SIL Simulation Default:** In [`simulation/harness/config.py`](simulation/harness/config.py), the simulator explicitly sets `SIM_DEAD_TIME = 1.0416667e-6 s` to match the simulated inverter plant's 0.5 V diode drop model, isolating SIL benchmarking from uncommissioned firmware defaults.
 - **Warning for Uncommissioned Hardware:** An uncompensated inverter causes moderate phase error (~6–7°), whereas over-compensation (assuming 0.5 V on an inverter with 0.0 V dead-time) causes parasitic square-wave zero-crossing chatter and severe angle degradation (~19.3°). Operating with `dead_time = 0.0f` until commissioning is completed guarantees safe, chatter-free operation.
 
 ## 9.3 Fault Injection
@@ -1531,7 +1531,7 @@ A successful result in one category does not automatically establish success in 
 | Scenario 14 (Persistent Ambiguous) | Verified | **PASS** (SAFE_STOP in 1500 ms, gate disabled, duty 0.0) |
 | Fault-isolation robustness sweep (144 configs) | Verified | **144/144 (100%) acceptable outcomes** across all 6 groups |
 | MATLAB & Simulink Co-Simulation | Verified | **PASS** (1.95 ms detection latency, 3.73° angle RMS) |
-| PlatformIO ESP32 build (`esp32dev`) | Verified | **SUCCESS** (RAM: 22,212 B / 6.8%, Flash: 299,545 B / 22.9%, 0 warnings). Raw log: [`docs/evidence/pio_build_20261020.log`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/docs/evidence/pio_build_20261020.log) |
+| PlatformIO ESP32 build (`esp32dev`) | Verified | **SUCCESS** (RAM: 22,212 B / 6.8%, Flash: 299,545 B / 22.9%, 0 double-promotion warnings with `-Werror=double-promotion`). Raw logs: [`docs/evidence/pio_build_clean_20261020.log`](docs/evidence/pio_build_clean_20261020.log) & [`docs/evidence/pio_build_bench_20261020.log`](docs/evidence/pio_build_bench_20261020.log) |
 | 10,000-tick performance benchmark | Verified | Host execution benchmark: <50 µs period (target requires hardware scope measurement on GPIO 14) |
 | Physical motor operation | Hardware Required | Requires dyno bench testing |
 | ESP32 execution-time profiling | NOT MEASURED - requires hardware | Oscilloscope capture on GPIO 14 (PIN_TIMING_BENCHMARK) required |

@@ -1,7 +1,7 @@
 PYTHON ?= $(shell if [ -x .venv/bin/python3 ]; then echo .venv/bin/python3; else which python3; fi)
 
 CC=gcc
-CFLAGS=-Wall -Wextra -O2 -fPIC -Wdouble-promotion -Werror=double-promotion
+CFLAGS=-Wall -Wextra -O2 -fPIC -Wdouble-promotion -Werror=double-promotion -DSIL_BUILD
 SRC_DIR=src
 BUILD_DIR=build
 SCENARIO ?= scenario_0_no_fault

@@ -67,19 +67,22 @@ build_flags = -I src -Wdouble-promotion -DBENCH_TIMING
 
 ## 4. Expected Serial Output
 
-When `-DBENCH_TIMING` is active, the firmware prints telemetry at 10 Hz and a consolidated timing benchmark banner every 1 second (accumulated over 20,000 real-time control ticks):
+When `-DBENCH_TIMING` is active, the firmware prints telemetry at 10 Hz and a consolidated timing benchmark banner every 1 second (accumulated over 20,000 real-time control ticks).
+
+> [!NOTE]
+> **ILLUSTRATIVE ONLY — FORMAT TEMPLATE**: The block below illustrates the console banner formatting. All numeric timings are placeholder `X.XX` markers until an engineer captures physical hardware logs.
 
 ```text
 Speed_RPM:1800.0	Target_RPM:1800.0	Health_%:100.0	Mode:2	Ia_Amps:0.12
 Speed_RPM:1800.0	Target_RPM:1800.0	Health_%:100.0	Mode:2	Ia_Amps:0.15
 
---- [BENCH_TIMING (20000 ticks / 1 s)] ---
+--- [BENCH_TIMING (20000 ticks / 1 s)] --- [ILLUSTRATIVE ONLY]
 ADC Read:      min:   X.XX us | avg:   X.XX us | max:   X.XX us
 Control Step:  min:   X.XX us | avg:   X.XX us | max:   X.XX us
 Total Task:    min:   X.XX us | avg:   X.XX us | max:   X.XX us
-Wake Period:   min:  49.80 us | avg:  50.00 us | max:  50.20 us (Jitter: +/-0.20 us)
-Overruns:      consecutive: 0 | total: 0
-------------------------------------------
+Wake Period:   min:   X.XX us | avg:   X.XX us | max:   X.XX us (Jitter: +/-X.XX us)
+Overruns:      consecutive: X | total: X
+--------------------------------------------------------------
 ```
 
 ### Metrics Explained
@@ -88,6 +91,11 @@ Overruns:      consecutive: 0 | total: 0
 - **`Total Task`:** Complete task activation window (matches GPIO 14 HIGH pulse width on scope).
 - **`Wake Period & Jitter`:** Elapsed time between successive ISR task notifications ($50.0\,\mu\text{s}$ nominal).
 - **`Overruns`:** Counts real-time deadline misses detected via `ulTaskNotifyTake` return value.
+
+### Setting `ADC_CONVERSION_TIMEOUT_US`
+The hardware ADC read timeout is guarded by `ADC_CONVERSION_TIMEOUT_US` in `src/main.cpp` (defaults to 15 µs via `#ifndef ADC_CONVERSION_TIMEOUT_US`).
+- **Tuning Rule:** When commissioning target hardware, `ADC_CONVERSION_TIMEOUT_US` must be configured (via `-DADC_CONVERSION_TIMEOUT_US=<value>` in `platformio.ini`) strictly **above the maximum observed ADC read time** (`ADC Read: max: X.XX us`) obtained during bench characterization.
+- **Budget Constraint:** Ensure $3 \times \text{ADC\_CONVERSION\_TIMEOUT\_US}$ remains bounded well below the 50 µs tick period to prevent overrun cascading if a hardware conversion hangs.
 
 ---
 

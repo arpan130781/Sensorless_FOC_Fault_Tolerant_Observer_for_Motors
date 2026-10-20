@@ -67,7 +67,10 @@ static volatile bool g_adc_hardware_fault = false;
 // per conversion could block the task for up to 150 us (3 missed ticks) before tripping.
 // Reducing to 15 us bounds conversion wait within a fraction of a single tick period,
 // guaranteeing that any hardware failure triggers an immediate abort and shutdown.
+// Overridable at compile time via -DADC_CONVERSION_TIMEOUT_US=<microseconds>.
+#ifndef ADC_CONVERSION_TIMEOUT_US
 #define ADC_CONVERSION_TIMEOUT_US 15
+#endif
 
 static inline uint16_t adc1_read_fast_reg(int channel, bool *out_error = NULL) {
     SENS.sar_meas_start1.sar1_en_pad = (1 << channel);
