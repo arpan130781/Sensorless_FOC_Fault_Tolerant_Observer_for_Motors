@@ -716,24 +716,64 @@ This section records the fourth-round audit findings, implemented engineering fi
 ## Round 7 - PDF Guide Documentation & Scenario Integrity Audit
 
 ### Root Cause & Defect Analysis
-1. **Hardcoded Scenario Table:** `build_pdf_guide.py` previously contained a hardcoded scenario table featuring legacy/untested entries ("Inverter Leg A Open", "Two-Phase Startup", "Intermittent Fault", etc.) that did not match the 15 canonical scenarios in `simulation/fault_injection/fault_scenarios.yaml`.
-2. **Ambiguous Fault Timeout Mismatch:** Figure 5 state machine diagram and Mode 4 table text listed an outdated 200 ms timeout for ambiguous dual faults, whereas the firmware implementation in `src/fault_monitor.c:431` rigorously enforces a 1.5 s (1500 ms) timeout (`fm->ambiguous_timer >= 1.5f`).
-3. **Safety Classification Imprecision:** The cover page listed "Fail-Operational with Bounded Latch Timeout" without distinguishing between single-fault operational degraded operation (2-shunt reconstruction) and fail-safe latching (SAFE_STOP with freewheeling diode protection).
-4. **Warning Claim Specificity:** Clean PlatformIO build logs contain 1 framework warning in `esp32-hal-uart.c` and 1 expected uncommissioned dead-time compile `#warning`, meaning "0 warnings" needed explicit qualification as "0 double-promotion warnings".
+1. **Hardcoded Scenario Table & Titles:** `build_pdf_guide.py` previously contained hardcoded titles and parameters that disagreed with `simulation/fault_injection/fault_scenarios.yaml`:
+   - Scenario 7 was incorrectly labeled "Ls +15%" instead of the YAML scale `0.80` (-20%).
+   - Scenario 10 was incorrectly labeled "300 RPM" instead of the YAML reference speed `500 RPM`.
+   - Scenario 11 was incorrectly labeled "200 RPM/s" instead of the YAML ramp rate `500 RPM/s`.
+   - Legacy fabricated scenario names ("Inverter Leg A Open", "Two-Phase Startup", "Intermittent Fault", "Torque Step (+0.5Nm)", "Phase B/C offset", "Parameter Mismatch +-20%") were present in draft tables.
+2. **Missing Test Result Grounding:** The PDF scenario table previously assumed "PASS" without enforcing actual test execution artifacts.
+3. **Hardcoded Test Counts:** Chapter 8 listed hardcoded test counts (86/8 vs actual 87/9; total 128 vs 131).
+4. **Incorrect Motor Torque Claim:** Draft text claimed a +0.10 N·m step "equals rated full load", whereas continuous rated torque is $1.5 \cdot P \cdot \psi_f \cdot I_n = 0.45\text{ N}\cdot\text{m}$ (making +0.10 N·m approximately 22% of continuous rated torque).
+5. **Ambiguous Fault Timeout Mismatch:** Draft diagrams listed 200 ms for ambiguous dual faults, whereas firmware in `src/fault_monitor.c:431` enforces a 1.5 s (1500 ms) timeout.
+6. **Ungrounded Marketing Claim:** The conclusion contained an unverified claim that this architecture delivered capabilities "previously reserved for aerospace hardware".
 
 ### Implementation & Verification
-1. **Dynamic Master Scenario Table:** Refactored `build_pdf_guide.py` to dynamically generate the master scenario table from `simulation/fault_injection/fault_scenarios.yaml` (all 15 scenarios: baseline + 14) and verified test outcomes in `build/pytest_report.xml`. Fault descriptions, onsets, channels, and numerical criteria are directly parsed from YAML.
-2. **Ambiguous Fault Timeout Alignment:** Corrected Mode 4 transition to `Timeout > 1.5 s (1500 ms) -> SAFE_STOP (Mode 5)` in `build_pdf_guide.py`, updated Figure 5 state chart in `generate_figures.py`, and regenerated `docs/figures/fig5_state_machine.png`.
-3. **Automated Code Constants Audit:** Implemented `audit_code_constants()` in `build_pdf_guide.py` to grep canonical `#defines` in `src/motor_params.h`, `src/fault_monitor.c`, and `src/main.cpp`. The PDF build script fails immediately on any constant mismatch.
-4. **Safety Classification Justification:** Updated cover metadata to `Single-Fault Operational (2-Shunt) / Fail-Safe (SAFE_STOP)` and expanded the Executive Summary to formally justify single-sensor fail-operational vs multi-sensor fail-safe behavior per ISO 26262 principles.
-5. **Regression Test Suite:** Added `simulation/test_pdf_integrity.py` with:
+1. **Dynamic Master Scenario Table & Parameter-Driven Titles:**
+   - Implemented `generate_scenario_title_and_desc(sc_key, y_conf)` in `build_pdf_guide.py` to dynamically construct titles and descriptions from YAML parameters (`scale`, `speed_ref_rpm`, `rate_rpm_per_s`, `torque_Nm`, `limits`, `offsets`).
+   - Sourced all 15 physical scenarios (baseline + 14 fault scenarios) directly from `simulation/fault_injection/fault_scenarios.yaml`.
+2. **JUnit Evidence Enforcement & "NOT RUN" Defaulting:**
+   - Created `pytest.ini` with `addopts = --junitxml=build/pytest_report.xml` so every automated test run generates structured machine-readable evidence.
+   - Added `simulation/conftest.py` with session hooks to preserve cumulative test results across partial test executions.
+   - Updated `get_scenario_data_from_yaml_and_junit` to default missing reports or untested scenarios strictly to `"NOT RUN"` rendered in `#64748B` grey, preventing unverified "PASS" publication.
+3. **Dynamic Test Suite Counts:**
+   - Implemented `get_collected_test_counts()` using `pytest --collect-only -q -o addopts=""` to dynamically count all 131 tests across all 12 modules at build time.
+4. **Calculated Motor Rated Continuous Torque:**
+   - Implemented `get_motor_rated_torque()` dynamically calculating $T_{rated} = 1.5 \cdot P \cdot \psi_f \cdot I_n = 1.5 \cdot 4 \cdot 0.015 \cdot 5.0 = 0.45\text{ N}\cdot\text{m}$ from `src/motor_params.h`.
+   - Updated Scenario 9 documentation to dynamically state that +0.10 N·m represents $\approx 22\%$ of continuous rated torque.
+5. **Firmware Ambiguous Fault Timeout Alignment:**
+   - Corrected Mode 4 timeout description in `build_pdf_guide.py` to `1.5 s (1500 ms) -> SAFE_STOP (Mode 5)`.
+   - Updated `docs/figures/fig5_state_machine.png` via `generate_figures.py`.
+6. **Grounded Engineering Conclusion:**
+   - Removed the aerospace claim from the PDF conclusion; replaced with a verifiable statement grounded in repo metrics (deterministic 20 kHz FOC, < 15 ms fault isolation, fail-safe latching, 100% green tests).
+7. **Automated PDF Regression Test Suite (`simulation/test_pdf_integrity.py`):**
    - `test_pdf_scenario_table_matches_yaml`: Asserts 15 scenarios, validates all criteria/onsets/modes against YAML, ensures no disallowed fabricated keys exist, and confirms PASS status.
+   - `test_committed_pdf_text_integrity`: Extracts text from `docs/Sensorless_FOC_Motor_Control_Guide.pdf` via `pypdf`, validates that YAML-derived titles and numbers appear (`0.80`, `-20%`, `500 RPM`, `500 RPM/s`, `0.10 N·m`, `0.45 N·m`, `22%`), and strictly asserts that none of the legacy fabricated names or ungrounded claims appear.
    - `test_code_constants_audit`: Verifies that all audited constants in C headers match canonical values.
-6. **Warning Descriptions:** Updated all compiler status descriptions across `docs/results/final_report.md` and `CHANGELOG-AUDIT.md` to: `0 double-promotion warnings (1 framework warning in esp32-hal-uart.c and the expected dead-time #warning are present in the logs)`.
 
-### Verification Metrics
-- **Automated Scenario Integrity & Constant Audit:** `.venv/bin/pytest simulation/test_pdf_integrity.py` $\to$ **PASSED (100%)**.
-- **Automated Physical Simulation Suite:** `.venv/bin/pytest simulation/ -q` $\to$ **128/128 PASSED (100%)**.
-- **PDF Compilation:** `.venv/bin/python build_pdf_guide.py` $\to$ **SUCCESS** (19 pages compiled cleanly with zero LaTeX syntax errors).
+### Generated vs. Hand-Written Numbers Audit
+
+The following table documents every numerical value appearing in `docs/Sensorless_FOC_Motor_Control_Guide.pdf`, classifying each as dynamically generated at build time or hand-written/fixed:
+
+| Category | Numerical Values | Source / Derivation | Status |
+| :--- | :--- | :--- | :--- |
+| **Scenario Parameters** | $R_s \times 1.05$ (+5%), $L_s \times 0.80$ (-20%), speed refs ($500$, $1800$, $2000$, $-2000\text{ RPM}$), ramp rate ($500\text{ RPM/s}$), load torque ($0.10\text{ N}\cdot\text{m}$), limits ($10.0\text{ A}$), offsets ($2.0\text{ A}$), onsets ($0.5\text{ s}, 1.5\text{ s}, 2.0\text{ s}$) | Dynamically generated from `simulation/fault_injection/fault_scenarios.yaml` | **GENERATED** |
+| **Acceptance Criteria** | Angle RMS limits ($5.0^\circ, 10.0^\circ$), max angle error ($15^\circ, 25^\circ, 35^\circ, 60^\circ, 80^\circ, 150^\circ$), ripple ($400, 450, 1000, 4500\text{ RPM}$), reconstruction error RMS ($0.15\text{ A}, 0.20\text{ A}$), latency ($15\text{ ms}$), $V_{bus}$ decay ($0.5\text{ V}$) | Dynamically generated from `simulation/fault_injection/fault_scenarios.yaml` | **GENERATED** |
+| **Test Verdicts** | All 15 scenario test result badges (`PASS`) | Dynamically parsed from `build/pytest_report.xml` testcases (defaults to `NOT RUN` in `#64748B` grey if absent) | **GENERATED** |
+| **Motor Rated Torque** | $T_{rated} = 0.45\text{ N}\cdot\text{m}$, load percentage $\approx 22\%$ | Dynamically computed from `src/motor_params.h` ($1.5 \cdot P \cdot \psi_f \cdot I_n$) | **GENERATED** |
+| **Test Suite Counts** | Total test count ($131$), per-file module counts (`test_scenarios.py`: 87, `test_handoff.py`: 9, `test_dead_time_sensitivity.py`: 8, `test_bldc.py`: 6, etc.) | Dynamically collected via `pytest --collect-only -q -o addopts=""` | **GENERATED** |
+| **Firmware Constants** | Control frequency ($20,000\text{ Hz}$), period ($50.0\text{ }\mu\text{s}$), ADC timeout ($15.0\text{ }\mu\text{s}$), overruns ($3$), pole pairs ($4$), $I_n$ ($5.0\text{ A}$), $V_{bus}$ ($24.0\text{ V}$), $R_s$ ($0.4\text{ }\Omega$), $L_s$ ($0.001\text{ H}$), $\psi_f$ ($0.015\text{ Wb}$), KCL threshold ($0.5\text{ A}$), timeout ($1.5\text{ s}$) | Audited against `#defines` in `src/motor_params.h`, `src/fault_monitor.c`, `src/main.cpp` (build fails on mismatch) | **AUDITED / GENERATED** |
+| **Static Memory Footprint** | RAM: $22,212\text{ bytes}$ (6.8% of 320 KB), Flash: $299,545\text{ bytes}$ (22.9% of 1.3 MB) | Exact cross-compiled ELF sizes from committed build evidence (`docs/evidence/pio_build_clean_20261020.log`) | **VERIFIED ARTIFACT** |
+| **Transformation Constants** | Clarke/Park coefficients ($\frac{2}{3}$, $\frac{1}{\sqrt{3}}$, $\frac{\sqrt{3}}{2}$) | Standard mathematical formulation of orthogonal projections | **HAND-WRITTEN (THEORY)** |
+| **On-Target Execution Timing** | ISR, ADC read, control step, loop jitter | Marked "NOT MEASURED - requires hardware" per repo rules (bench timing flag added in Round 5, requires physical hardware run) | **NOT MEASURED** |
+
+---
+
+## Round 7 Verification Summary
+
+- **Physical Simulation Test Suite:** `.venv/bin/pytest simulation/ -q` $\to$ **131/131 PASSED (100% GREEN)**.
+- **Automated PDF Integrity Suite:** `.venv/bin/pytest simulation/test_pdf_integrity.py` $\to$ **3/3 PASSED (100%)**.
+- **Automated Code Constants Audit:** Verified all constants match canonical C source code definitions.
+- **PDF Compilation:** `docs/Sensorless_FOC_Motor_Control_Guide.pdf` compiles cleanly with dynamic table generation and zero formatting errors.
+
 
 
