@@ -58,6 +58,23 @@ def test_safe_stop_peak_current_below_limit():
     assert vbus_rise > 0.1, (
         f"Expected bus voltage rise during SAFE_STOP quenching, but got {vbus_rise:.3f} V."
     )
-    # Bus voltage should bleed back down toward nominal via bleeder resistor
+    # Bus voltage must bleed back down toward nominal via bleeder resistor (RC = 50 ohm * 470 uF = 23.5 ms).
+    # Verify quantitative decay by stated margins after stated times:
+    t_peak_idx = np.where(safe_stop_mask)[0][np.argmax(res.v_bus[safe_stop_mask])]
+    t_peak = t[t_peak_idx]
+
+    # At t = t_peak + 50 ms (~2 RC time constants), bus voltage must have decayed by at least 50% of the rise
+    t_50ms_idx = np.searchsorted(t, t_peak + 0.050)
+    assert t_50ms_idx < len(t), "Simulation must extend at least 50 ms beyond peak bus voltage"
+    vbus_at_50ms = float(res.v_bus[t_50ms_idx])
+    decay_50ms = vbus_peak - vbus_at_50ms
+    assert decay_50ms >= 0.50 * vbus_rise, (
+        f"Bus voltage after 50 ms did not decay sufficiently: decayed {decay_50ms:.3f} V, "
+        f"expected >= {0.50 * vbus_rise:.3f} V (50% of {vbus_rise:.3f} V rise). Current Vbus: {vbus_at_50ms:.3f} V."
+    )
+
+    # At simulation end (t > t_peak + 200 ms, >8 RC time constants), bus voltage must return to within 0.05 V of nominal
     vbus_final = float(res.v_bus[-1])
-    assert vbus_final <= vbus_peak, "Bus voltage must bleed down after inductive quench"
+    assert vbus_final <= vbus_nominal + 0.05, (
+        f"Bus voltage at end of simulation ({vbus_final:.3f} V) did not fully bleed to nominal ({vbus_nominal:.1f} V)."
+    )
