@@ -620,6 +620,34 @@ SIL sensitivity testing across plant dead-times against a controller configured 
 | **0.00 V** | 0.50 V ($-0.50$ V Over-Comp) | **19.29°** | Degraded ($> 15.0^\circ$) | Documented degradation from zero-crossing over-compensation |
 | **0.00 V** | 0.00 V (Reconfigured $t_{dead}=0$) | **0.48°** | Pass | Recovered via parameter adjustment |
 
+### Inverter Dead-Time Commissioning Procedure for Hardware Deployment
+
+In real three-phase voltage source inverters (VSI), gate drivers insert a non-overlap blanking time ($t_{dead}$) between complementary MOSFET/IGBT switches in each phase leg to prevent DC link shoot-through. During this dead-time, output phase voltage is determined solely by the sign of the phase current through the freewheeling body diodes, inducing an average fundamental voltage loss:
+$$V_{dead} = t_{dead} \cdot f_{pwm} \cdot V_{bus} \cdot \text{sign}(i_{phase})$$
+
+Because dead-time distortion produces 5th and 7th harmonic voltages and degrades observer angle tracking around zero-crossings, the controller includes feedforward compensation parameterized by `ctrl.dead_time` in [`src/motor_params.h`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/motor_params.h). To commission this value on physical inverter hardware:
+
+#### Step 1: Physical Dead-Time Measurement via Oscilloscope
+1. Connect high-bandwidth isolated differential probes to the high-side gate (GH) and low-side gate (GL) of Phase A relative to the phase switch-node.
+2. Under steady switching (e.g. 50% duty, motor disconnected or locked at zero current), measure:
+   - $t_{blank}$: Blanking duration between high-side gate turn-off ($V_{GH} \le V_{th}$) and low-side gate turn-on ($V_{GL} \ge V_{th}$).
+   - $t_{rise}, t_{fall}$: MOSFET switch-node transition times ($10\%\leftrightarrow 90\%$ of $V_{bus}$).
+3. Calculate effective physical dead-time:
+   $$t_{dead\_eff} \approx t_{blank} + \frac{t_{fall} - t_{rise}}{2}$$
+
+#### Step 2: Empirical Terminal Voltage Distortion Calibration
+Alternatively, measure the volt-second loss directly on the spinning or stationary motor:
+1. Lock rotor or run under steady light load at constant speed.
+2. Apply a known commanded fundamental voltage $V_{cmd}$ across varying current levels ($I_s = 0.5\text{ A}$ to $5.0\text{ A}$).
+3. Measure the fundamental terminal phase voltage $V_{fund}$ with a power analyzer or calibrated oscilloscope FFT.
+4. Plot $V_{loss} = V_{cmd} - V_{fund}$ versus current polarity. The vertical offset jump at $i = 0$ corresponds to $2 \cdot V_{dead}$.
+5. Calculate the equivalent controller parameter:
+   $$t_{dead} = \frac{V_{dead}}{f_{pwm} \cdot V_{bus}}$$
+
+#### Step 3: Configuring the Firmware
+- In [`src/motor_params.h`](file:///Users/arpankailashgupta/Desktop/sensorless-foc-pio/src/motor_params.h), update `CTRL_PARAM_DEAD_TIME` with the commissioned value (e.g. `1.0416667e-6f` for 0.5 V distortion at 20 kHz / 24 V).
+- **Warning for Uncommissioned Hardware:** If deploying to uncharacterized hardware where $t_{dead}$ is unknown, configure `ctrl.dead_time = 0.0f`. An uncompensated inverter causes moderate phase error (~6–7°), whereas over-compensation (assuming 0.5 V on an inverter with 0.0 V dead-time) causes parasitic square-wave zero-crossing chatter and severe angle degradation (~19.3°).
+
 ## 9.3 Fault Injection
 
 The fault injector supports several fault types.

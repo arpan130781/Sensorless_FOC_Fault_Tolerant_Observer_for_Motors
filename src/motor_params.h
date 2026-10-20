@@ -40,7 +40,17 @@
 #define CTRL_PARAM_PWM_FREQ     20000.0f    // PWM & current loop frequency (Hz)
 #define CTRL_PARAM_CTRL_CURR    20000.0f    // Current control execution rate (Hz)
 #define CTRL_PARAM_CTRL_SPD     1000.0f     // Speed loop execution rate (Hz)
-#define CTRL_PARAM_DEAD_TIME    1.0416667e-6f // Inverter dead-time (s): Vdead = dead_time * pwm_freq * Vbus = 0.5V
+
+// Inverter dead-time compensation (s):
+// [MUST BE COMMISSIONED FOR TARGET HARDWARE]
+// Physical inverters drop phase voltage according to gate-driver switching dead-time:
+//   V_dead = dead_time * pwm_freq * V_bus
+// This parameter MUST BE COMMISSIONED for physical inverter hardware using the procedure
+// detailed in README.md ("Inverter Dead-Time Commissioning Procedure for Hardware Deployment").
+// For uncommissioned target hardware, set to 0.0f to avoid zero-crossing distortion.
+// In this reference configuration, it is pre-commissioned to the benchmark SIL plant model (0.5V):
+//   dead_time = 0.5V / (20000 Hz * 24.0V) = 1.0416667e-6 s.
+#define CTRL_PARAM_DEAD_TIME    1.0416667e-6f // [MUST BE COMMISSIONED] Pre-commissioned for 0.5V benchmark plant
 
 static inline MotorParams get_default_motor_params(void) {
     MotorParams p = {

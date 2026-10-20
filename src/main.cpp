@@ -304,6 +304,9 @@ void setup() {
     // Initialize Motor & Controller Parameters from canonical source of truth
     MotorParams motor = get_default_motor_params();
     ControllerParams ctrl = get_default_controller_params();
+    // Dead-Time Commissioning Note:
+    // Physical hardware requires inverter dead-time commissioning (see README.md).
+    // If operating uncommissioned hardware, set ctrl.dead_time = 0.0f to avoid overcompensation.
     foc_init(&motor, &ctrl);
     foc_set_speed_ref(1800.0f * (2.0f * (float)M_PI / 60.0f) * M_P); // Target: 1800 RPM electrical
 
