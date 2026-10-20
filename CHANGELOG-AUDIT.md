@@ -452,3 +452,93 @@ This section records the third-round audit findings, implemented engineering fix
 ### Implementation
 - Updated `CHANGELOG-AUDIT.md` fixing stale references in Round 1 (remedying host timing distinction vs target scope measurements and updating test counts from 65 to 110 tests).
 - Documented complete Round 3 engineering metrics, before/after values, and host vs target test environments.
+
+---
+
+# Round 4 Audit Fixes & Quality Remediation
+
+This section records the fourth-round audit findings, implemented engineering fixes, and verification results across `sensorless-foc-pio`.
+
+## Round 4 - Task 1: Severe Residual Fast Track Consecutive Sample Requirement & Extended Burst Spike Rejection
+
+### Defects Identified
+- The severe-residual fast track (`|E| > 1.5 A` with 2 consecutive samples) allowed a 2-sample noise burst of +2.0 A or +3.0 A on any phase current sensor to latch a sensor fault, dropping the controller into `DEGRADED` mode for 500 ms and causing unnecessary speed dips.
+
+### Implementation
+- **Consecutive Sample Requirement:** Updated `src/fault_monitor.c` line 52 to require 3 consecutive samples (`kcl_exceed_count >= 3`) before triggering severe-residual fast-track isolation:
+  ```c
+  if (fabsf(E) > KCL_SEVERE_THRESH && fm->kcl_exceed_count >= 3)
+  ```
+- **Consistent Stuck Detection:** Aligned stuck sensor detection to require `stuck_count >= 8` (0.4 ms) with `iso_win = 0.0004f`, ensuring instantaneous noise bursts do not latch stuck sensor isolation while preserving fast stuck isolation for genuine faults.
+- **Extended Burst Spike Regression Tests:** Expanded `test_burst_spike_rejection` in `simulation/test_scenarios.py` to parameterize over 36 permutations:
+  - Magnitudes: 0.5 A, 1.0 A with burst lengths 1, 2, 3, 4 samples.
+  - Magnitudes: 2.0 A, 3.0 A with burst lengths 1, 2 samples.
+  - Channels: Phase A, Phase B, Phase C.
+
+### Verification Metrics
+- **Burst Rejection Suite:** 36/36 parameterized burst test cases **PASSED**; control mode remained strictly in `CLOSED_LOOP` (mode 2) with zero false fault trips.
+- **Scenario 4 Timing:** Stuck sensor Phase A isolated in 0.45 ms; maximum electrical angle error reached 42.42° (nominal) and 25.28° (sensor model), comfortably passing the 60.0° limit.
+- **Scenarios 13 & 14:** Two-sensor sequential fault and persistent ambiguous fault passed within strict YAML timing limits.
+
+---
+
+## Round 4 - Task 2: Documentation Integrity & Oscilloscope Profiling Clarification
+
+### Defects Identified
+- `README.md`, `docs/results/final_report.md`, and `CHANGELOG-AUDIT.md` previously claimed physical oscilloscope measurements on target ESP32 hardware (ISR 0.8 µs, ADC 4.5 µs, control loop 14.2 µs, total 18.7 µs).
+- No oscilloscope capture files, logs, or raw hardware traces exist in the repository, conflicting with documentation integrity requirements.
+
+### Implementation
+- **Timing Claims Removed:** Removed unverified oscilloscope timing numbers across `README.md`, `docs/results/final_report.md`, and `CHANGELOG-AUDIT.md`.
+- **Hardware Requirement Status:** Marked all target hardware execution-time profiling rows as `"NOT MEASURED - requires hardware"`, clearly specifying that physical oscilloscope captures on GPIO 14 (`PIN_TIMING_BENCHMARK`) are required.
+- **Harmonized Memory Metrics:** Clarified that PlatformIO build metrics (RAM 6.8%, Flash 22.8%) represent static ELF memory footprint from host cross-compilation (`pio run`), not on-target runtime telemetry.
+
+---
+
+## Round 4 - Task 3: Bounded ADC Conversion Timeout & Non-Linearity Documentation
+
+### Defects Identified
+- `adc1_read_fast_reg()` in `src/main.cpp` used an unbounded polling loop (`while (!SENS.sar_meas_start1.meas1_done_sar) {}`), risking infinite deadlock if the SAR ADC hardware failed to assert completion.
+- Inaccurate comment claimed `"~1.5 us per conversion"` without physical measurement.
+- ESP32 SAR ADC 11 dB attenuation non-linearity was undocumented.
+
+### Implementation
+- **Bounded Timeout Wait:** Added a 50 µs bounded timeout using `esp_timer_get_time()`. If conversion does not complete within 50 µs, `g_adc_hardware_fault` is latched.
+- **Hardware Fault Handling:** On timeout expiry, the firmware immediately commands `gpio_set_level(PIN_GATE_EN, 0)`, zeroes all PWM duties, latches the red fault LED, sets `telemetry_mode = 5` (`SAFE_STOP`), and skips control loop execution.
+- **Calibration Check:** Added timeout detection during the 500-sample startup zero-offset calibration loop in `setup()`.
+- **Non-Linearity Documentation:** Documented that ESP32 SAR ADC 11 dB attenuation non-linearity is uncorrected by LUT / `esp_adc_cal` in raw register read mode, detailing that symmetrical shunt sensing operates near midpoint (1.65 V) and specifying hardware characterization requirements.
+
+---
+
+## Round 4 - Task 4: Quantitative DC Bus Voltage Decay Margin Assertion
+
+### Defects Identified
+- In `simulation/test_safe_stop_current.py`, the assertion `assert vbus_final <= vbus_peak` was vacuous because `vbus_peak` was the maximum over a window containing `vbus_final`.
+
+### Implementation
+- **Exponential Decay Grounding:** Grounded assertions in physical bleeder circuit dynamics ($R_{bleed} = 50\,\Omega$, $C_{bus} = 470\,\mu\text{F}$, $\tau = 23.5\text{ ms}$).
+- **Stated Margin & Time Assertions:**
+  - At $t = t_{peak} + 50\text{ ms}$ (~2 time constants), verified bus voltage decayed by at least 50% of the peak rise ($\Delta V_{decay} \ge 0.50 \cdot V_{rise}$). Measured decay: **0.393 V** (88.1% of 0.447 V rise).
+  - At simulation end ($t > t_{peak} + 200\text{ ms}$, >8 time constants), verified bus voltage returns to within 0.05 V of nominal ($V_{bus} \le 24.05\text{ V}$). Measured final: **24.000 V**.
+
+---
+
+## Round 4 - Task 5: Default Dead-Time Parameter Commissioning & Hardware Procedure
+
+### Defects Identified
+- Default controller `dead_time` parameter in `src/motor_params.h` was hardcoded to the simulator's constant ($1.0416667\times 10^{-6}\text{ s}$ corresponding to 0.5 V) without clear indication that it is a hardware-dependent commissioning parameter.
+- No procedure existed in `README.md` explaining how to measure and commission actual inverter dead-time distortion on physical hardware.
+
+### Implementation
+- **Canonical Parameter Flagging:** Updated `src/motor_params.h` to clearly designate `CTRL_PARAM_DEAD_TIME` as `[MUST BE COMMISSIONED FOR TARGET HARDWARE]`, explaining the physical origin ($V_{dead} = t_{dead} \cdot f_{pwm} \cdot V_{bus}$), default uncommissioned recommendation (0.0 s), and calibrated SIL reference value.
+- **Firmware Commissioning Guard:** Added commissioning guidance in `src/main.cpp` alerting developers to set `ctrl.dead_time = 0.0f` on uncommissioned hardware to prevent zero-crossing overcompensation.
+- **Hardware Commissioning Guide:** Added comprehensive section `### Inverter Dead-Time Commissioning Procedure for Hardware Deployment` in `README.md` detailing:
+  - Step 1: Physical non-overlap dead-time measurement via high-bandwidth differential oscilloscope probing ($t_{blank}$, $t_{rise}$, $t_{fall}$).
+  - Step 2: Empirical terminal voltage distortion calibration via fundamental volt-second loss curve ($V_{loss}$ vs current polarity).
+  - Step 3: Exact parameter derivation formula and firmware configuration.
+
+### Verification Metrics
+- **C Transform Unit Tests:** `make lib && make test` $\to$ **PASSED** (<$10^{-5}$ float round-trip invertibility).
+- **Embedded PlatformIO Build:** `pio run` $\to$ **SUCCESS** (RAM 6.8%, Flash 22.8%, 0 warnings with `-Wdouble-promotion -Werror=double-promotion`).
+- **Complete Automated Test Suite:** `.venv/bin/python3 -m pytest simulation/ -q` $\to$ **122/122 PASSED (100%)** in 637.89s.
+
