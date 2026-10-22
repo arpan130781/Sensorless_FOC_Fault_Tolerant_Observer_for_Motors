@@ -841,6 +841,7 @@ The following table documents every numerical value appearing in `docs/Sensorles
    - Updated `test_junit_report_has_exactly_one_record_per_collected_test` to report: `"Testcase ... has stale source fingerprint"`.
 4. **README Evidence Documentation:**
    - Added Section 14.5 to `README.md` documenting the exact scope of files covered by the deterministic SHA-256 evidence fingerprint (`src/*.c`, `src/*.h`, `src/motor_params.h`, `simulation/fault_injection/fault_scenarios.yaml`, `simulation/**/*.py` excluding `test_pdf*`).
+   - Clarified that firmware entry points and build files (`src/main.cpp`, `platformio.ini`, `Makefile`) are not hashed in the SIL source fingerprint, and that embedded firmware compilation and warnings are evidenced separately by committed build logs in `docs/evidence/pio_build_*.log`.
 
 ---
 

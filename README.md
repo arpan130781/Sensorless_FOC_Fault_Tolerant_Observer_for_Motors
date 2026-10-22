@@ -1246,12 +1246,15 @@ Do not change an acceptance threshold merely to turn a failing test into a passi
 To guarantee that reported test results, published PDF tables, and validation claims are cryptographically bound to the current codebase, the test runner computes a deterministic SHA-256 source fingerprint (`compute_source_fingerprint`). Every JUnit `<testcase>` record written to `build/pytest_report.xml` is stamped with this fingerprint attribute.
 
 ### Covered Files
-The evidence fingerprint deterministically hashes the content and relative paths of all core algorithmic, firmware, and physical simulation files:
+The evidence fingerprint deterministically hashes the content and relative paths of all core C algorithmic motor control, observer, parameter, and physical simulation files:
 1. **Core C Controller & Observer Source Code:** `src/*.c` (`src/fault_monitor.c`, `src/flux_observer.c`, `src/foc_core.c`, `src/handoff.c`, `src/if_startup.c`, `src/observer_manager.c`, `src/pi_controller.c`, `src/smo.c`).
 2. **C Header Definitions & Public APIs:** `src/*.h` (`src/fault_monitor.h`, `src/flux_observer.h`, `src/foc_api.h`, `src/handoff.h`, `src/if_startup.h`, `src/observer_manager.h`, `src/pi_controller.h`, `src/smo.h`).
 3. **Canonical Motor & Controller Parameters:** `src/motor_params.h`.
 4. **Physical Fault Scenarios & Acceptance Criteria:** `simulation/fault_injection/fault_scenarios.yaml`.
 5. **Physical Plant Models, Harnesses & Simulation Test Suites:** `simulation/**/*.py` (including PMSM ODE plant, BLDC plant, inverter models, SIL runner, C bridge, metrics, and all 133 physics tests; excluding standalone PDF rendering/text integrity tests `simulation/test_pdf*`).
+
+> [!NOTE]
+> **Firmware Build Evidence:** Firmware entry points and build configuration files (`src/main.cpp`, `platformio.ini`, and `Makefile`) are not hashed by the SIL source fingerprint. Embedded firmware compilation, flash/RAM utilization, and compiler warning assertions are evidenced separately by the full build logs committed in [`docs/evidence/pio_build_clean_20261020.log`](docs/evidence/pio_build_clean_20261020.log) and [`docs/evidence/pio_build_bench_20261020.log`](docs/evidence/pio_build_bench_20261020.log).
 
 ### Staleness Prevention & Non-Git Export Compatibility
 - **Automatic Stale Record Invalidation:** If any covered source file is modified, the computed SHA-256 fingerprint changes. `simulation/conftest.py` immediately prunes stale historical records from `build/pytest_report.xml` upon session initialization.
