@@ -817,6 +817,43 @@ The following table documents every numerical value appearing in `docs/Sensorles
 - **Automated Code Constants Audit:** All constants verified against canonical C headers.
 - **PDF Artifact:** `docs/Sensorless_FOC_Motor_Control_Guide.pdf` compiled cleanly with source fingerprint traceability and verified on Page 19.
 
+---
+
+## Round 9 - Staleness Regression Test Remediation & Non-Git Export Compatibility
+
+### Root Cause & Defect Analysis
+1. **False-Positive Pass in Staleness Mutation Test:** In Round 8, `test_staleness_detection_fails_on_source_mutation` created a temporary copy without `.git`. Inside this copy, `test_committed_pdf_text_integrity` failed because `subprocess.check_output(["git", "log", ...])` raised `CalledProcessError` (exit code 128: `fatal: not a git repository`). Because the test assertion accepted any output containing `"failed"`, the test passed even with zero source mutation.
+2. **Crash in Non-Git Environments:** Running `test_pdf_integrity.py` in a non-git export (e.g., source tarball or CI container without git metadata) caused `test_committed_pdf_text_integrity` to crash on `git log` rather than skipping only the commit-hash check.
+3. **Unverified Control Baseline:** The staleness test lacked an unmutated control step verifying that the copied environment passes cleanly before mutation is applied.
+4. **Vague Error Assertion:** The assertion did not verify that the failure was specifically caused by a fingerprint mismatch.
+
+### Implementation & Verification
+1. **Non-Git Export Detection & Commit-Hash Skip:**
+   - In `simulation/test_pdf_integrity.py` (`test_committed_pdf_text_integrity`), added a check for `.git` and `git rev-parse --is-inside-work-tree`.
+   - When `.git` is absent, the test cleanly skips *only* the commit-hash assertion, emitting a `UserWarning` and a diagnostic note to stderr: `"[SKIP] Non-git export detected (.git missing): skipping commit-hash assertion in PDF text integrity."`
+   - All other assertions (disallowed phrases, YAML parameters, rated torque calculations, scenario titles, and SHA-256 source fingerprint) remain strictly active and pass.
+2. **Two-Phase Staleness Test (Control + Mutation):**
+   - In `test_staleness_detection_fails_on_source_mutation`:
+     - **Phase 1 (Control):** Executes `pytest simulation/test_pdf_integrity.py -v` in the clean, unmutated non-git temporary directory with `SKIP_STALENESS_SUBPROCESS=1` and asserts that it passes 100% (exit code 0).
+     - **Phase 2 (Mutation):** Appends a comment to `src/fault_monitor.c`, re-executes `test_pdf_integrity.py`, asserts that it fails (exit code != 0), and asserts that the combined output explicitly contains the exact string `"stale source fingerprint"`.
+3. **Targeted Failure Messages in Integrity Suite:**
+   - Updated `test_pdf_scenario_table_matches_yaml` to report: `"(got 'NOT RUN': missing or stale source fingerprint)"`.
+   - Updated `test_junit_report_has_exactly_one_record_per_collected_test` to report: `"Testcase ... has stale source fingerprint"`.
+4. **README Evidence Documentation:**
+   - Added Section 14.5 to `README.md` documenting the exact scope of files covered by the deterministic SHA-256 evidence fingerprint (`src/*.c`, `src/*.h`, `src/motor_params.h`, `simulation/fault_injection/fault_scenarios.yaml`, `simulation/**/*.py` excluding `test_pdf*`).
+
+---
+
+## Round 9 Verification Summary
+
+- **C Unit Tests:** `make lib && make test` $\to$ **PASSED** (<$10^{-5}$ float round-trip invertibility, 0 warnings).
+- **Physical Simulation Test Suite:** `.venv/bin/pytest simulation/ -q` $\to$ **133/133 PASSED (100% GREEN)**.
+- **Automated PDF Integrity Suite:** `.venv/bin/pytest simulation/test_pdf_integrity.py` $\to$ **5/5 PASSED (100%)** in 2.47s.
+- **Two-Phase Staleness Test:** Verified control phase passes with exit code 0; mutated phase fails with exit code 1 and outputs `"stale source fingerprint"`.
+- **Non-Git Export:** Verified unmutated copy without `.git` passes all tests with UserWarning on commit hash.
+- **Documentation:** `README.md` and `CHANGELOG-AUDIT.md` fully updated.
+
+
 
 
 

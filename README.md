@@ -1241,6 +1241,23 @@ If a test fails, investigate the failing assertion and determine whether the imp
 
 Do not change an acceptance threshold merely to turn a failing test into a passing test.
 
+## 14.5 Automated Test Evidence & Cryptographic Source Fingerprinting
+
+To guarantee that reported test results, published PDF tables, and validation claims are cryptographically bound to the current codebase, the test runner computes a deterministic SHA-256 source fingerprint (`compute_source_fingerprint`). Every JUnit `<testcase>` record written to `build/pytest_report.xml` is stamped with this fingerprint attribute.
+
+### Covered Files
+The evidence fingerprint deterministically hashes the content and relative paths of all core algorithmic, firmware, and physical simulation files:
+1. **Core C Controller & Observer Source Code:** `src/*.c` (`src/fault_monitor.c`, `src/flux_observer.c`, `src/foc_core.c`, `src/handoff.c`, `src/if_startup.c`, `src/observer_manager.c`, `src/pi_controller.c`, `src/smo.c`).
+2. **C Header Definitions & Public APIs:** `src/*.h` (`src/fault_monitor.h`, `src/flux_observer.h`, `src/foc_api.h`, `src/handoff.h`, `src/if_startup.h`, `src/observer_manager.h`, `src/pi_controller.h`, `src/smo.h`).
+3. **Canonical Motor & Controller Parameters:** `src/motor_params.h`.
+4. **Physical Fault Scenarios & Acceptance Criteria:** `simulation/fault_injection/fault_scenarios.yaml`.
+5. **Physical Plant Models, Harnesses & Simulation Test Suites:** `simulation/**/*.py` (including PMSM ODE plant, BLDC plant, inverter models, SIL runner, C bridge, metrics, and all 133 physics tests; excluding standalone PDF rendering/text integrity tests `simulation/test_pdf*`).
+
+### Staleness Prevention & Non-Git Export Compatibility
+- **Automatic Stale Record Invalidation:** If any covered source file is modified, the computed SHA-256 fingerprint changes. `simulation/conftest.py` immediately prunes stale historical records from `build/pytest_report.xml` upon session initialization.
+- **Fail-Safe Integrity Gate:** `simulation/test_pdf_integrity.py` validates that 100% of scenario records in `build/pytest_report.xml` have an active matching source fingerprint. Any stale or missing record immediately fails the integrity suite with an explicit message: `"missing or stale source fingerprint"`.
+- **Non-Git Export Compatibility:** In environments where `.git` is absent (such as source tarballs, zip archives, or isolated container deployments), the PDF text integrity test validates all physics parameters, scenario titles, and the source fingerprint, while cleanly skipping only the Git commit-hash verification with a diagnostic warning notice.
+
 ---
 
 # 16. Running Individual Scenarios
@@ -1521,7 +1538,7 @@ A successful result in one category does not automatically establish success in 
 | C controller implementation | Verified | Complete FOC core, observers, fault monitor, PI loops |
 | Native transform tests (`make test`) | Verified | **PASSED** (Library Clarke/Park/InvPark/InvClarke round-trip $<10^{-5}$) |
 | Python simulation environment | Verified | Full PMSM and BLDC numerical simulation suite |
-| Automated pytest suite (`pytest simulation/`) | Verified | **65/65 PASSED (100%)** |
+| Automated pytest suite (`pytest simulation/`) | Verified | **133/133 PASSED (100%)** |
 | BLDC plant model & tests | Verified | **6/6 PASSED** (Trapezoidal back-EMF, KCL, FOC ripple) |
 | Standard fault scenarios (0–14) | Verified | **15/15 PASSED (100%)** |
 | Realistic ADC Sensor Model Sweep | Verified | **15/15 PASSED (100%)** (Quantization, noise, clipping, offset) |
